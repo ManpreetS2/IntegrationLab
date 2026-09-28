@@ -3,37 +3,52 @@
 IntegrationLab is a partner-integration reliability console for connecting,
 monitoring, debugging, and recovering third-party API integrations.
 
-## Current milestone: Failure Lab + deterministic diagnosis
+## Current milestone: Stripe Webhooks + Idempotency + Retry Engine
 
 Working pieces:
 
 - React + TypeScript frontend
 - FastAPI + PostgreSQL + SQLAlchemy + Alembic
 - GitHub OAuth (state + PKCE + encrypted tokens)
-- Provider request logging
-- **Failure Lab** — sandboxed scenario simulator
-- Deterministic diagnosis from observed evidence
-- Simulated vs real request log badges
+- Provider request logging (outbound)
+- Failure Lab: a sandboxed scenario simulator with deterministic diagnosis
+- **Stripe webhooks**:
+  - Official SDK signature verification on the exact raw body.
+  - Durable receipt with a quick 2xx.
+  - Duplicate delivery dedupe and effect-level idempotency.
+  - Handler registry.
+  - Deterministic 1s/2s/4s retries.
+  - Failed queue with manual retry and dismiss.
+  - Dashboard section.
 
 ## Architecture
 
-Real provider path:
+Outbound (real):
 
 ```text
 GitHub → ProviderHttpResult → request log (real)
 ```
 
-Failure Lab path:
+Outbound (Failure Lab):
 
 ```text
 Simulator → ProviderHttpResult → request log (simulated) → diagnosis → failure run
 ```
 
-Simulated failures **do not** affect real provider connection state and **do not**
-decrypt or use real OAuth credentials.
+Inbound (Stripe):
+
+```text
+Stripe → raw body → signature check → dedupe → webhook_events → 200
+webhook_events → processor → handler → effect (once) → processed
+                                  └─ retryable failure → 1s/2s/4s → failed queue
+```
+
+Simulated failures **do not** affect real provider connection state. Inbound
+webhooks are stored in `webhook_events`, not in the outbound request log.
 
 See:
 
+- [docs/stripe-webhooks.md](docs/stripe-webhooks.md)
 - [docs/failure-lab.md](docs/failure-lab.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/database.md](docs/database.md)
@@ -60,6 +75,19 @@ npm install
 npm run dev
 ```
 
+### Stripe webhooks locally
+
+Set `STRIPE_WEBHOOK_SECRET` in `backend/.env`; the app boots without it, but the
+webhook endpoint returns 503. With the Stripe CLI:
+
+```bash
+stripe listen --forward-to localhost:8000/webhooks/stripe/<stripe-integration-id>
+stripe trigger payment_intent.succeeded
+cd backend && python -m app.scripts.process_webhooks
+```
+
+Details and interview notes: [docs/stripe-webhooks.md](docs/stripe-webhooks.md).
+
 ## Testing
 
 ```bash
@@ -73,16 +101,19 @@ cd frontend && npm run lint && npm run build
 - GitHub OAuth + encrypted tokens + connection checks
 - Provider request observability
 - Failure Lab scenarios (401/403/404/429/500/timeout/malformed JSON/transport)
-- Deterministic diagnosis + retryability classification (no auto-retry)
+- Deterministic diagnosis + retryability classification
+- Stripe webhooks:
+  - `payment_intent.succeeded`, `payment_intent.payment_failed`, and `charge.refunded` are handled.
+  - Unknown events are safely ignored.
+  - Processing retries, a failed queue, and manual retry/dismiss.
 
 ## Current non-features
 
-- Automatic retries / backoff / DLQ
-- Stripe webhooks
-- Redis / queues / AWS
+- Real payment mutations / Stripe API writes
+- Redis / Celery / queues / AWS (the worker is a CLI tick)
 - AI diagnosis
-- App user authentication
+- App user authentication (operator endpoints are local prototype controls)
 
 ## Next milestone
 
-**Stripe webhooks + idempotency + retry policy**
+**Reliability Dashboard + guided diagnostics**

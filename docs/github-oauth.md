@@ -98,6 +98,14 @@ Connect is a **browser navigation** (302 → GitHub). Do not `fetch()` it expect
 7. Backend stores the **encrypted** token, safe profile metadata, marks the integration `connected`, and redirects to the frontend with `/?oauth=github&status=connected`.
 8. React never sees the access token.
 
+Cancel / error callbacks (`?error=access_denied&state=...`) go through the same
+state validation. The request is only treated as our flow when `state` is
+present, known, for GitHub, unused, and unexpired. In that case the state is
+marked used and the browser is redirected to
+`/?oauth=github&status=cancelled` (or `status=error` for other errors).
+Missing, unknown, expired, or reused state returns HTTP 400.
+`error_description` is never reflected back.
+
 ## Security checklist
 
 | Rule | How we enforce it |
@@ -106,7 +114,7 @@ Connect is a **browser navigation** (302 → GitHub). Do not `fetch()` it expect
 | Access token encrypted at rest | Fernet via `TOKEN_ENCRYPTION_KEY` |
 | `state` prevents OAuth CSRF | Random state, hashed in DB, bound to integration |
 | PKCE protects code exchange | S256 challenge; original verifier sent on exchange |
-| Single-use / expiry | ~10 minute TTL; `used_at` set on success |
+| Single-use / expiry | ~10 minute TTL; `used_at` set on success and on valid cancel |
 | Tokens never in React | Not in JSON, redirects, or localStorage |
 | Minimal scope | `read:user` only |
 | `.env` ignored | Secrets stay local |

@@ -114,3 +114,92 @@ export interface FailureLabRunListItem {
   retryable: boolean
   created_at: string
 }
+
+export type WebhookProcessingStatus =
+  | 'pending'
+  | 'processing'
+  | 'processed'
+  | 'retry_scheduled'
+  | 'failed'
+  | 'ignored'
+  | 'dismissed'
+
+export interface WebhookEventSummary {
+  id: string
+  integration_id: string
+  provider: string
+  provider_event_id: string
+  event_type: string
+  provider_object_id: string | null
+  livemode: boolean | null
+  amount: number | null
+  currency: string | null
+  processing_status: WebhookProcessingStatus
+  delivery_count: number
+  attempt_count: number
+  cycle_attempt_count: number
+  retry_cycle: number
+  manual_retry_count: number
+  max_attempts: number
+  next_attempt_at: string | null
+  first_received_at: string
+  last_received_at: string
+  processed_at: string | null
+  failed_at: string | null
+  dismissed_at: string | null
+  last_error_code: string | null
+  last_error_message: string | null
+}
+
+export interface WebhookEffect {
+  id: string
+  effect_key: string
+  effect_type: string
+  provider_object_id: string | null
+  summary: string | null
+  applied_at: string
+}
+
+export interface WebhookAttempt {
+  id: string
+  attempt_number: number
+  retry_cycle: number
+  cycle_attempt_number: number
+  started_at: string
+  finished_at: string | null
+  outcome: 'in_progress' | 'succeeded' | 'ignored' | 'failed' | 'abandoned'
+  error_code: string | null
+  error_message: string | null
+  retryable: boolean | null
+  scheduled_delay_seconds: number | null
+  manual: boolean
+}
+
+export interface WebhookEventDetail extends WebhookEventSummary {
+  api_version: string | null
+  provider_created_at: string | null
+  processing_started_at: string | null
+  signature_verified: boolean
+  effects: WebhookEffect[]
+  attempts: WebhookAttempt[]
+}
+
+export interface WebhookSummary {
+  received: number
+  duplicate_deliveries: number
+  pending: number
+  processing: number
+  processed: number
+  retry_scheduled: number
+  failed: number
+  ignored: number
+  dismissed: number
+}
+
+export interface ProcessDueResult {
+  processed: number
+  retry_scheduled: number
+  failed: number
+  ignored: number
+  skipped: number
+}

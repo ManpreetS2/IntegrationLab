@@ -1,12 +1,16 @@
 """Hardening tests: malformed JSON, OAuth HTTP-200 errors, cancel callback."""
 
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
+from uuid import UUID
 
 import respx
 from httpx import Response
 from sqlalchemy import select
 
+from app.core.security import TokenCipher, generate_oauth_state, hash_oauth_state
 from app.db.models.oauth import OAuthCredentialORM, OAuthSessionORM, ProviderRequestLogORM
+from app.repositories.oauth import oauth_session_repository
 from app.services.github_client import GITHUB_TOKEN_URL, classify_github_error, normalize_json_response
 
 
@@ -202,11 +206,67 @@ def test_oauth_cancel_access_denied(client, db_session, github_integration_id) -
     assert replay.status_code == 400
 
 
-def test_oauth_cancel_invalid_state_still_redirects(client) -> None:
+def test_oauth_cancel_unknown_state_rejected(client) -> None:
     response = client.get(
         "/api/oauth/github/callback",
-        params={"error": "access_denied", "state": "unknown-state"},
+        params={
+            "error": "access_denied",
+            "error_description": "The user denied your request",
+            "state": "unknown-state",
+        },
         follow_redirects=False,
     )
-    assert response.status_code == 302
-    assert "status=cancelled" in response.headers["location"]
+    assert response.status_code == 400
+    assert "location" not in response.headers
+    assert "The user denied" not in response.text
+
+
+def test_oauth_cancel_missing_state_rejected(client) -> None:
+    response = client.get(
+        "/api/oauth/github/callback",
+        params={"error": "access_denied"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+
+
+def test_oauth_cancel_expired_state_rejected(client, db_session, github_integration_id) -> None:
+    state = generate_oauth_state()
+    oauth_session_repository.create(
+        db_session,
+        integration_id=UUID(github_integration_id),
+        provider="github",
+        state_hash=hash_oauth_state(state),
+        code_verifier_encrypted=TokenCipher().encrypt("verifier"),
+        expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/api/oauth/github/callback",
+        params={"error": "access_denied", "state": state},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+
+
+def test_oauth_cancel_reused_state_rejected(client, github_integration_id) -> None:
+    start = client.get(
+        f"/api/integrations/{github_integration_id}/github/connect",
+        follow_redirects=False,
+    )
+    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+
+    first = client.get(
+        "/api/oauth/github/callback",
+        params={"error": "access_denied", "state": state},
+        follow_redirects=False,
+    )
+    assert first.status_code == 302
+
+    second = client.get(
+        "/api/oauth/github/callback",
+        params={"error": "access_denied", "state": state},
+        follow_redirects=False,
+    )
+    assert second.status_code == 400

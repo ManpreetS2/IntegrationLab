@@ -11,6 +11,11 @@ from app.db.models.oauth import (
     OAuthSessionORM,
     ProviderRequestLogORM,
 )
+from app.db.models.webhook import (
+    WebhookEffectORM,
+    WebhookEventORM,
+    WebhookProcessingAttemptORM,
+)
 
 __all__ = [
     "IntegrationORM",
@@ -19,4 +24,7 @@ __all__ = [
     "GitHubProfileORM",
     "ProviderRequestLogORM",
     "FailureLabRunORM",
+    "WebhookEventORM",
+    "WebhookProcessingAttemptORM",
+    "WebhookEffectORM",
 ]
