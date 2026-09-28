@@ -9,12 +9,18 @@ import type {
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Default Content-Type first, then merge caller headers so they can
+  // intentionally override without wiping the helper defaults via spread order.
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  if (init?.headers) {
+    new Headers(init.headers).forEach((value, key) => {
+      headers.set(key, value)
+    })
+  }
+
   const response = await fetch(`${API_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
     ...init,
+    headers,
   })
 
   if (!response.ok) {

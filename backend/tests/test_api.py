@@ -57,3 +57,25 @@ def test_create_integration_returns_201() -> None:
     assert body["created_at"]
     assert body["last_checked_at"] is None
     assert len(store.list_all()) == before_count + 1
+
+
+def test_create_integration_rejects_whitespace_only_name() -> None:
+    before_count = len(store.list_all())
+
+    response = client.post(
+        "/api/integrations",
+        json={"name": "   ", "provider": "github"},
+    )
+
+    assert response.status_code == 422
+    assert len(store.list_all()) == before_count
+
+
+def test_create_integration_trims_name_whitespace() -> None:
+    response = client.post(
+        "/api/integrations",
+        json={"name": "  GitHub Production  ", "provider": "github"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["name"] == "GitHub Production"

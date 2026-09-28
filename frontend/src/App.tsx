@@ -32,8 +32,10 @@ function App() {
   }, [loadIntegrations])
 
   async function handleCreate(name: string, provider: IntegrationProvider) {
-    await createIntegration({ name, provider })
-    await loadIntegrations()
+    // Use the POST response directly so a later refresh failure cannot
+    // make a successful create look like it failed (and invite duplicates).
+    const created = await createIntegration({ name, provider })
+    setIntegrations((current) => [...current, created])
   }
 
   return (
