@@ -1,30 +1,26 @@
 # Database Notes (Interview Study)
 
-Plain-English notes for IntegrationLab's PostgreSQL persistence milestone.
+IntegrationLab persists integrations, OAuth state/credentials, GitHub profile
+metadata, and provider request logs in PostgreSQL.
 
-## PostgreSQL
-
-PostgreSQL is a relational database. It stores data in tables (rows and columns)
-and guarantees durability: when a transaction commits, the data is written so it
-survives process restarts.
-
-IntegrationLab uses PostgreSQL 18 locally via Docker Compose.
-
-## Table: `integrations`
+## ER overview
 
 ```text
 integrations
----------------------
-id               UUID PK
-name             VARCHAR(100) NOT NULL
-provider         VARCHAR(50)  NOT NULL
-status           VARCHAR(50)  NOT NULL
-created_at       TIMESTAMPTZ  NOT NULL
-last_checked_at  TIMESTAMPTZ  NULL
+  │
+  ├── oauth_credentials     (encrypted access token, one per integration)
+  ├── oauth_sessions        (temporary state + encrypted PKCE verifier)
+  ├── github_profiles       (safe public metadata)
+  └── provider_request_logs (outbound HTTP observability)
 ```
 
 ```mermaid
 erDiagram
+  INTEGRATIONS ||--o| OAUTH_CREDENTIALS : has
+  INTEGRATIONS ||--o{ OAUTH_SESSIONS : starts
+  INTEGRATIONS ||--o| GITHUB_PROFILES : mirrors
+  INTEGRATIONS ||--o{ PROVIDER_REQUEST_LOGS : emits
+
   INTEGRATIONS {
     uuid id PK
     varchar name
@@ -33,158 +29,101 @@ erDiagram
     timestamptz created_at
     timestamptz last_checked_at
   }
+
+  OAUTH_SESSIONS {
+    uuid id PK
+    uuid integration_id FK
+    varchar provider
+    varchar state_hash UK
+    text code_verifier_encrypted
+    timestamptz created_at
+    timestamptz expires_at
+    timestamptz used_at
+  }
+
+  OAUTH_CREDENTIALS {
+    uuid id PK
+    uuid integration_id FK UK
+    varchar provider
+    text access_token_encrypted
+    varchar token_type
+    text granted_scopes
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  GITHUB_PROFILES {
+    uuid integration_id PK_FK
+    bigint github_user_id
+    varchar login
+    text avatar_url
+    text html_url
+    int public_repos
+    timestamptz connected_at
+    timestamptz last_synced_at
+  }
+
+  PROVIDER_REQUEST_LOGS {
+    uuid id PK
+    uuid integration_id FK
+    varchar provider
+    varchar method
+    varchar endpoint
+    int status_code
+    int latency_ms
+    timestamptz timestamp
+    text error_message
+    int rate_limit_remaining
+  }
 ```
 
-**Primary key:** `id` uniquely identifies one integration row. We generate UUIDs
-in the application so IDs exist before insert and stay portable.
+Deleting an integration cascades to related OAuth sessions, credentials, GitHub
+profile, and request logs (`ON DELETE CASCADE`).
 
-No extra indexes yet — the table is tiny and the primary key already supports
-lookups by id. Index later when real query patterns (logs/webhooks) appear.
+## Why credentials and profile are separate
 
-### Future (not built yet)
+- **Credentials** hold secrets (encrypted tokens). They must never be serialized
+  to the frontend.
+- **Profiles** hold safe display metadata (login, avatar, public repo count).
 
-Later milestones may add tables for OAuth credentials, API request logs,
-webhooks, and retries. Those are out of scope for this milestone.
+Separating them keeps API responses simple and reduces the chance of accidental
+token leakage through ORM serialization.
 
-## provider / status storage tradeoff
+## Encryption at rest
 
-Allowed values today:
+Access tokens and PKCE verifiers are stored as Fernet ciphertext.
 
-- provider: `github`, `stripe`
-- status: `not_connected`, `connected`, `needs_setup`
+- Key source: `TOKEN_ENCRYPTION_KEY` only
+- Do not auto-generate a new key on every startup
+- Ciphertext is never returned by the API
 
-We store them as **strings** in PostgreSQL and enforce allowed values in
-**Python/Pydantic**.
+## Migrations
 
-Why not native Postgres ENUMs?
-
-- Changing Postgres ENUM values requires careful migrations
-- Application enums are easier to evolve early
-- Validation still happens at the API boundary
-
-## ORM (SQLAlchemy)
-
-An ORM maps Python classes to database tables.
-
-- Class `IntegrationORM` ↔ table `integrations`
-- Instance attributes ↔ columns
-- `session.add(obj)` stages an INSERT/UPDATE
-- Querying returns Python objects instead of raw tuples
-
-Pydantic models stay separate: they are the **API contract**, not the table map.
-
-## Engine
-
-The **Engine** is connection infrastructure:
-
-- Knows the database URL
-- Owns a **connection pool**
-- Creates DBAPI connections (via psycopg) as needed
-
-There is typically one Engine per process.
-
-## Session
-
-A **Session** is a unit of work:
-
-- Tracks ORM objects you load/create
-- Batches SQL
-- Belongs to one request in our FastAPI design (`get_db`)
-
-Do not share one Session across concurrent requests.
-
-## Transaction
-
-A transaction is an atomic set of database operations.
-
-- **commit** — make changes permanent
-- **rollback** — undo uncommitted changes after an error
-
-Create flow:
-
-1. Build ORM object
-2. `session.add()`
-3. `session.commit()`
-4. `session.refresh()` to reload DB defaults/state
-5. Return the persisted object
-
-If commit fails, we rollback and return a safe 5xx to the client.
-
-## Connection pooling
-
-SQLAlchemy's Engine keeps a pool of open connections.
-
-- Opening a TCP/auth round-trip every query would be slow
-- The pool reuses connections
-- Sessions borrow connections as needed
-
-We use SQLAlchemy defaults (+ `pool_pre_ping=True`). No PgBouncer/Redis yet.
-
-## Migration (Alembic)
-
-**ORM model ≠ live database schema.**
-
-Changing `IntegrationORM` in Python does not alter an existing PostgreSQL
-database by itself.
-
-Alembic migration files describe schema changes over time:
+| Revision | Purpose |
+|----------|---------|
+| `001_create_integrations` | Base integrations table |
+| `002_github_oauth_and_logs` | OAuth + profile + request logs |
 
 ```bash
-alembic upgrade head     # apply migrations
-alembic downgrade -1     # revert one revision
-alembic current          # show applied revision
+alembic upgrade head
+alembic downgrade -1
+alembic upgrade head
 ```
 
-We do **not** use `Base.metadata.create_all()` as the normal schema strategy.
-Migrations are explicit and checked into Git.
+Do not edit `001` after it has been merged. Add new revisions instead.
 
-## Repository layer
+## Observability tradeoff
 
-Routes should not contain random SQL.
-
-`IntegrationRepository` owns list/create (and helpers for seed/get).
-
-Benefits:
-
-- HTTP layer stays thin
-- Database logic is testable
-- Storage can evolve without rewriting route signatures
-
-## Persistence
-
-Day 1 stored integrations in a Python list. Restarting FastAPI wiped them.
-
-Now rows live in PostgreSQL. Restarting FastAPI reconnects and reads the same
-rows. That is the core proof of this milestone.
-
-## Environment variables
-
-`DATABASE_URL` (and `TEST_DATABASE_URL`) keep credentials out of source code.
-
-- `.env` is gitignored
-- `.env.example` documents safe local defaults
-- API responses never include `DATABASE_URL`
-
-## Liveness vs readiness
-
-- **Liveness** (`GET /health`): is the process alive?
-- **Readiness** (`GET /ready`): can it reach PostgreSQL?
-
-A living process can still be unready if the database is down.
-
-## Why sync SQLAlchemy right now?
-
-Current FastAPI routes are synchronous. Sync SQLAlchemy matches that style and
-avoids async session/engine complexity before we need it.
-
-## Why no PgBouncer / Redis / queues yet?
-
-Those tools solve scale and async workload problems we do not have. Adding them
-now would obscure the persistence learning goal.
+Provider request logs are committed independently of the main OAuth persistence
+transaction so a logging insert failure does not wipe a successful GitHub call.
+Credential/profile updates for a connection still commit atomically together.
 
 ## Test database
 
-Pytest uses `integrationlab_test`, not `integrationlab`.
+Pytest uses `integrationlab_test` (name must end with `_test`). Fixtures truncate
+all OAuth-related tables between tests and refuse unsafe DB names.
 
-Fixtures refuse to truncate a database whose name does not end with `_test`, so a
-misconfigured `TEST_DATABASE_URL` fails loudly instead of wiping demo data.
+## Related docs
+
+- [architecture.md](architecture.md)
+- [github-oauth.md](github-oauth.md)

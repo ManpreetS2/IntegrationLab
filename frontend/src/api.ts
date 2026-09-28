@@ -1,9 +1,12 @@
 /** Thin HTTP helpers for talking to the FastAPI backend. */
 
 import type {
+  GitHubCheckResult,
+  GitHubConnection,
   HealthResponse,
   Integration,
   IntegrationCreateRequest,
+  ProviderRequestLog,
 } from './types'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -46,6 +49,33 @@ export function createIntegration(
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export function githubConnectUrl(integrationId: string): string {
+  return `${API_URL}/api/integrations/${integrationId}/github/connect`
+}
+
+export function getGitHubConnection(integrationId: string): Promise<GitHubConnection> {
+  return request<GitHubConnection>(`/api/integrations/${integrationId}/github`)
+}
+
+export function checkGitHubConnection(integrationId: string): Promise<GitHubCheckResult> {
+  return request<GitHubCheckResult>(`/api/integrations/${integrationId}/github/check`, {
+    method: 'POST',
+  })
+}
+
+export function listProviderRequests(params?: {
+  provider?: string
+  integration_id?: string
+  limit?: number
+}): Promise<ProviderRequestLog[]> {
+  const search = new URLSearchParams()
+  if (params?.provider) search.set('provider', params.provider)
+  if (params?.integration_id) search.set('integration_id', params.integration_id)
+  if (params?.limit) search.set('limit', String(params.limit))
+  const query = search.toString()
+  return request<ProviderRequestLog[]>(`/api/provider-requests${query ? `?${query}` : ''}`)
 }
 
 export { API_URL }

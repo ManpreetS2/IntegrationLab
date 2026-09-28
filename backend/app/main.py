@@ -5,7 +5,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, integrations
+from app.api import github, health, integrations, oauth, provider_requests
 from app.core.config import get_settings
 
 logging.basicConfig(
@@ -17,8 +17,8 @@ settings = get_settings()
 
 app = FastAPI(
     title="IntegrationLab",
-    description="Partner-integration reliability console (PostgreSQL persistence)",
-    version="0.2.0",
+    description="Partner-integration reliability console (GitHub OAuth + observability)",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -31,3 +31,6 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(integrations.router)
+app.include_router(github.router)
+app.include_router(oauth.router)
+app.include_router(provider_requests.router)

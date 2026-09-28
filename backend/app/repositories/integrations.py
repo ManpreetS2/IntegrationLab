@@ -53,5 +53,26 @@ class IntegrationRepository:
         )
         return session.scalars(statement).first()
 
+    def update_status(
+        self,
+        session: Session,
+        integration: IntegrationORM,
+        *,
+        status: str,
+        last_checked_at: datetime | None = None,
+        commit: bool = True,
+    ) -> IntegrationORM:
+        """Update integration connection status (and optional last_checked_at)."""
+        integration.status = status
+        if last_checked_at is not None:
+            integration.last_checked_at = last_checked_at
+        session.add(integration)
+        if commit:
+            session.commit()
+            session.refresh(integration)
+        else:
+            session.flush()
+        return integration
+
 
 integration_repository = IntegrationRepository()

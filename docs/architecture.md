@@ -1,97 +1,116 @@
-# IntegrationLab Architecture — PostgreSQL Persistence
+# IntegrationLab Architecture — GitHub OAuth + Observability
 
-Day 1 taught the straight HTTP path with an in-memory list. This milestone
-keeps the same public API and replaces the list with PostgreSQL.
+IntegrationLab still uses the PostgreSQL foundation from the previous milestone.
+This milestone adds the first **real third-party provider connection**: GitHub
+OAuth + authenticated REST + provider request logging.
 
 ## High-level flow (current)
 
 ```text
 Browser
   → React (http://localhost:5173)
-  → HTTP/JSON request
-  → FastAPI route
-  → request-scoped SQLAlchemy Session (get_db)
-  → IntegrationRepository
-  → SQLAlchemy statement
-  → psycopg
-  → PostgreSQL
-  → ORM objects
-  → Pydantic API models
-  → JSON response
-  → React state
-  → rendered UI
+  → FastAPI (http://localhost:8000)
+  → GitHub OAuth / REST API
+  → PostgreSQL (credentials, profile, request logs)
 ```
-
-## GET /api/integrations
-
-1. React calls `GET http://localhost:8000/api/integrations`.
-2. FastAPI matches the list route.
-3. `Depends(get_db)` opens a request-scoped Session from the shared Engine.
-4. The route calls `IntegrationRepository.list_all(session)`.
-5. SQLAlchemy issues a `SELECT` on `integrations`.
-6. Rows become `IntegrationORM` objects, then Pydantic `Integration` models.
-7. FastAPI returns JSON. React stores and renders it.
-
-## POST /api/integrations
-
-1. React submits `{ "name": "...", "provider": "github" }`.
-2. Pydantic `IntegrationCreate` validates and trims the name.
-3. The route receives a Session via `get_db`.
-4. The repository creates an `IntegrationORM`, `session.add()`, `commit()`, `refresh()`.
-5. PostgreSQL persists the row inside a transaction.
-6. FastAPI returns HTTP **201** with the full integration JSON.
-7. React appends the returned object to local state (no dependency on storage internals).
-
-## Why React does not talk to PostgreSQL
-
-Correct:
-
-```text
-React → HTTP → FastAPI → repository → SQLAlchemy → PostgreSQL
-```
-
-Incorrect:
-
-```text
-React → PostgreSQL
-```
-
-Reasons:
-
-- Database credentials stay on the backend
-- The API enforces validation and business rules
-- Frontend code does not depend on table schemas
-- The database can evolve without rewriting the UI
 
 ## Layers
 
-| Layer | Role |
-|-------|------|
-| Pydantic models (`app/models`) | HTTP request/response validation |
-| ORM models (`app/db/models`) | Table mapping |
-| Repository (`app/repositories`) | Database operations |
-| Routes (`app/api`) | HTTP behavior |
-| Alembic (`alembic/versions`) | Schema history |
+```text
+Route
+  → GitHubOAuthService
+  → GitHubClient (httpx)
+  → repositories
+  → SQLAlchemy Session
+  → PostgreSQL
+```
 
-## Health vs readiness
+React never talks to GitHub or PostgreSQL directly.
 
-- `GET /health` — **liveness**: process is up (does not query Postgres)
-- `GET /ready` — **readiness**: Postgres answers `SELECT 1`
+## OAuth start
 
-## Day 1 → current change
+```text
+React (Connect GitHub link)
+  → GET /api/integrations/{id}/github/connect
+  → validate integration + OAuth config
+  → generate state + PKCE (S256)
+  → store oauth_sessions (hashed state, encrypted verifier)
+  → 302 Redirect → GitHub authorize URL
+```
 
-| Day 1 | Now |
-|-------|-----|
-| `IntegrationStore` + Python list | `IntegrationRepository` + PostgreSQL |
-| Data gone on restart | Data survives backend restart |
-| No migrations | Alembic `001_create_integrations` |
+Authorization URL includes: `client_id`, `redirect_uri`, `state`,
+`code_challenge`, `code_challenge_method=S256`, `scope=read:user`.
 
-## Intentional non-goals (later milestones)
+## Callback
 
-- GitHub OAuth / Stripe APIs / webhooks
-- Request logging, retries, Redis, queues, AWS
-- Authentication / users
+```text
+GitHub
+  → GET /api/oauth/github/callback?code=&state=
+  → validate OAuth session (hash, expiry, single-use, provider)
+  → decrypt PKCE verifier
+  → POST GitHub /login/oauth/access_token
+  → GET GitHub /user
+  → encrypt access token → oauth_credentials
+  → upsert github_profiles
+  → mark integration connected
+  → mark oauth session used
+  → 302 Redirect → FRONTEND_URL/?oauth=github&status=connected
+```
+
+Why React never receives the token:
+
+- Token exchange runs only on the backend (needs `client_secret`).
+- Access tokens are encrypted and stored in PostgreSQL.
+- API responses and frontend redirects intentionally omit tokens and ciphertext.
+
+## Check connection
+
+```text
+React (Check connection)
+  → POST /api/integrations/{id}/github/check
+  → load encrypted credential
+  → decrypt token
+  → GET GitHub /user
+  → write provider_request_logs
+  → update profile + last_checked_at + status
+  → safe JSON result (no token)
+```
+
+- Success → `connected`
+- Provider `401` → `needs_setup`
+
+## Provider request logging
+
+Every outbound GitHub HTTP call from `GitHubClient` records:
+
+- provider, method, endpoint
+- status_code (nullable on transport failure)
+- latency_ms (`time.perf_counter()`)
+- timestamp
+- sanitized error label
+- optional `X-RateLimit-Remaining`
+
+Tradeoff: request-log persistence commits separately from the main OAuth
+transaction so a logging failure does not undo a successful provider call.
+Credential/profile writes still roll back together if persistence fails after
+a successful `/user` fetch during callback.
+
+## Existing Day-1 / Postgres APIs (unchanged)
+
+- `GET /health` — liveness (no GitHub config required)
+- `GET /ready` — Postgres readiness
+- `GET /api/integrations`
+- `POST /api/integrations`
+
+## Intentional non-goals (next: Failure Lab)
+
+- Failure Lab simulators (401/429/500/timeout)
+- Retries / backoff / DLQ
+- Stripe APIs / webhooks
+- Redis / queues / AWS
+- Application user authentication
 
 ## Related docs
 
-- [database.md](database.md) — Engine, Session, transactions, Alembic learning notes
+- [github-oauth.md](github-oauth.md) — setup + security + interview notes
+- [database.md](database.md) — tables, encryption, ER diagram

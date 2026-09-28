@@ -1,24 +1,48 @@
-import { useCallback, useEffect, useState } from 'react'
-import { API_URL, createIntegration, getHealth, listIntegrations } from './api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  API_URL,
+  createIntegration,
+  getHealth,
+  listIntegrations,
+  listProviderRequests,
+} from './api'
 import CreateIntegrationForm from './components/CreateIntegrationForm'
+import GitHubConnectionPanel from './components/GitHubConnectionPanel'
 import IntegrationsTable from './components/IntegrationsTable'
+import ProviderRequestsTable from './components/ProviderRequestsTable'
 import SummaryCards from './components/SummaryCards'
-import type { Integration, IntegrationProvider } from './types'
+import type { Integration, IntegrationProvider, ProviderRequestLog } from './types'
+
+function readOauthNotice(): string | null {
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('oauth') === 'github' && params.get('status') === 'connected') {
+    window.history.replaceState({}, '', window.location.pathname)
+    return 'GitHub connected successfully.'
+  }
+  return null
+}
 
 function App() {
   const [integrations, setIntegrations] = useState<Integration[]>([])
+  const [requestLogs, setRequestLogs] = useState<ProviderRequestLog[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [systemStatus, setSystemStatus] = useState<'checking' | 'ok' | 'error'>('checking')
+  const [oauthNotice, setOauthNotice] = useState<string | null>(() => readOauthNotice())
 
   const loadIntegrations = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const [health, items] = await Promise.all([getHealth(), listIntegrations()])
+      const [health, items, logs] = await Promise.all([
+        getHealth(),
+        listIntegrations(),
+        listProviderRequests({ limit: 50 }),
+      ])
       setSystemStatus(health.status === 'ok' ? 'ok' : 'error')
       setIntegrations(items)
+      setRequestLogs(logs)
     } catch (err) {
       setSystemStatus('error')
       setError(err instanceof Error ? err.message : 'Failed to load integrations.')
@@ -37,6 +61,11 @@ function App() {
     const created = await createIntegration({ name, provider })
     setIntegrations((current) => [...current, created])
   }
+
+  const githubIntegrations = useMemo(
+    () => integrations.filter((item) => item.provider === 'github'),
+    [integrations],
+  )
 
   return (
     <div className="app-shell">
@@ -59,6 +88,15 @@ function App() {
       </header>
 
       <main className="app-main">
+        {oauthNotice ? (
+          <div className="banner banner-success" role="status">
+            <strong>{oauthNotice}</strong>
+            <button type="button" className="secondary-button" onClick={() => setOauthNotice(null)}>
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         {error ? (
           <div className="banner banner-error" role="alert">
             <strong>Could not reach the backend.</strong>
@@ -83,6 +121,34 @@ function App() {
                 </button>
               </div>
               <IntegrationsTable integrations={integrations} />
+            </section>
+
+            {githubIntegrations.length > 0 ? (
+              <section className="panel">
+                <h2>GitHub connections</h2>
+                <p className="muted">Connect a GitHub OAuth App with read:user scope. Tokens never reach the browser.</p>
+                <div className="github-list">
+                  {githubIntegrations.map((integration) => (
+                    <article key={integration.id} className="github-card">
+                      <h3>{integration.name}</h3>
+                      <GitHubConnectionPanel
+                        integration={integration}
+                        onStatusChange={loadIntegrations}
+                      />
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <section className="panel">
+              <div className="panel-header">
+                <h2>Recent provider requests</h2>
+                <button type="button" className="secondary-button" onClick={() => void loadIntegrations()}>
+                  Refresh logs
+                </button>
+              </div>
+              <ProviderRequestsTable logs={requestLogs} />
             </section>
 
             <section className="panel">

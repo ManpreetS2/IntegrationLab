@@ -18,7 +18,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Env vars: DATABASE_URL, TEST_DATABASE_URL
     database_url: str = Field(
         ...,
         description="SQLAlchemy database URL (postgresql+psycopg://...)",
@@ -34,6 +33,13 @@ class Settings(BaseSettings):
         ]
     )
 
+    # Optional GitHub OAuth settings — app boots without them; OAuth routes fail clearly.
+    github_client_id: str | None = None
+    github_client_secret: str | None = None
+    github_oauth_redirect_uri: str = "http://localhost:8000/api/oauth/github/callback"
+    frontend_url: str = "http://localhost:5173"
+    token_encryption_key: str | None = None
+
     @field_validator("database_url")
     @classmethod
     def require_postgres_url(cls, value: str) -> str:
@@ -47,6 +53,15 @@ class Settings(BaseSettings):
                 "(postgresql+psycopg://...). SQLite fallback is not supported."
             )
         return normalized
+
+    def github_oauth_configured(self) -> bool:
+        """True when all values required to start a GitHub OAuth flow are present."""
+        return bool(
+            self.github_client_id
+            and self.github_client_secret
+            and self.github_oauth_redirect_uri
+            and self.token_encryption_key
+        )
 
 
 @lru_cache

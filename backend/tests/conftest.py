@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import pytest
 from alembic import command
 from alembic.config import Config
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -24,6 +25,16 @@ TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
     "postgresql+psycopg://integrationlab:integrationlab@localhost:5432/integrationlab_test",
 )
+
+# Stable test Fernet key + fake GitHub OAuth config for mocked tests.
+os.environ.setdefault("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+os.environ.setdefault("GITHUB_CLIENT_ID", "test-github-client-id")
+os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-github-client-secret")
+os.environ.setdefault(
+    "GITHUB_OAUTH_REDIRECT_URI",
+    "http://localhost:8000/api/oauth/github/callback",
+)
+os.environ.setdefault("FRONTEND_URL", "http://localhost:5173")
 
 
 def assert_safe_test_database(url: str) -> str:
@@ -85,7 +96,13 @@ def TestingSessionLocal(test_engine):
 def clean_db(test_engine, TestingSessionLocal) -> Generator[None, None, None]:
     """Truncate tables before each test, then reseed demo rows."""
     with test_engine.begin() as connection:
-        connection.execute(text("TRUNCATE TABLE integrations RESTART IDENTITY CASCADE"))
+        connection.execute(
+            text(
+                "TRUNCATE TABLE provider_request_logs, github_profiles, "
+                "oauth_credentials, oauth_sessions, integrations "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
 
     session = TestingSessionLocal()
     try:
@@ -120,3 +137,14 @@ def client(TestingSessionLocal) -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def github_integration_id(client) -> str:
+    """Create a fresh GitHub integration and return its id."""
+    response = client.post(
+        "/api/integrations",
+        json={"name": "OAuth Test GitHub", "provider": "github"},
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
