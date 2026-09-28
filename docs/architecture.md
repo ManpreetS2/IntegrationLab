@@ -1,110 +1,97 @@
-# IntegrationLab Architecture — Day 1
+# IntegrationLab Architecture — PostgreSQL Persistence
 
-This document explains the Day 1 foundation in plain language. The goal is
-to make the request path obvious before we add databases, OAuth, queues,
-or cloud infrastructure.
+Day 1 taught the straight HTTP path with an in-memory list. This milestone
+keeps the same public API and replaces the list with PostgreSQL.
 
-## High-level flow
+## High-level flow (current)
 
 ```text
 Browser
-  → React (Vite frontend on http://localhost:5173)
+  → React (http://localhost:5173)
   → HTTP/JSON request
-  → FastAPI route (backend on http://localhost:8000)
-  → In-memory data store (Python list in process memory)
+  → FastAPI route
+  → request-scoped SQLAlchemy Session (get_db)
+  → IntegrationRepository
+  → SQLAlchemy statement
+  → psycopg
+  → PostgreSQL
+  → ORM objects
+  → Pydantic API models
   → JSON response
-  → React state update
-  → Rendered UI
+  → React state
+  → rendered UI
 ```
-
-Day 1 is intentionally a straight line. There is no database layer, no
-auth middleware, and no background worker between the route and the data.
 
 ## GET /api/integrations
 
-What happens when the dashboard loads or refreshes:
-
-1. The browser opens the React app.
-2. React runs a `fetch` (or similar) to `GET http://localhost:8000/api/integrations`.
-3. FastAPI receives the request and matches the integrations list route.
-4. The route asks the in-memory store for every integration.
-5. The store returns the current Python list of Pydantic `Integration` models.
-6. FastAPI serializes those models to JSON and sends the response.
-7. React parses the JSON into TypeScript objects and stores them in component state.
-8. The UI renders summary cards and the integrations table from that state.
-
-Seeded Day 1 data includes two integrations:
-
-- GitHub (`provider: github`, `status: not_connected`)
-- Stripe (`provider: stripe`, `status: not_connected`)
+1. React calls `GET http://localhost:8000/api/integrations`.
+2. FastAPI matches the list route.
+3. `Depends(get_db)` opens a request-scoped Session from the shared Engine.
+4. The route calls `IntegrationRepository.list_all(session)`.
+5. SQLAlchemy issues a `SELECT` on `integrations`.
+6. Rows become `IntegrationORM` objects, then Pydantic `Integration` models.
+7. FastAPI returns JSON. React stores and renders it.
 
 ## POST /api/integrations
 
-What happens when you submit the create form:
+1. React submits `{ "name": "...", "provider": "github" }`.
+2. Pydantic `IntegrationCreate` validates and trims the name.
+3. The route receives a Session via `get_db`.
+4. The repository creates an `IntegrationORM`, `session.add()`, `commit()`, `refresh()`.
+5. PostgreSQL persists the row inside a transaction.
+6. FastAPI returns HTTP **201** with the full integration JSON.
+7. React appends the returned object to local state (no dependency on storage internals).
 
-1. You enter a display name and choose a provider in the React form.
-2. React sends `POST http://localhost:8000/api/integrations` with a JSON body such as:
+## Why React does not talk to PostgreSQL
 
-```json
-{
-  "name": "Acme GitHub",
-  "provider": "github"
-}
-```
-
-3. FastAPI validates the body with the Pydantic `IntegrationCreate` model.
-4. The route asks the in-memory store to create a new integration.
-5. The store generates:
-   - `id` (UUID)
-   - `created_at` (UTC timestamp)
-   - default `status` (`not_connected`)
-   - `last_checked_at` (`null` for Day 1)
-6. The new record is appended to the in-memory list.
-7. FastAPI returns HTTP **201** with the full integration JSON.
-8. React updates local state (often by re-fetching the list) and the table shows the new row.
-
-## Backend layout (Day 1)
-
-| Path | Role |
-|------|------|
-| `backend/app/main.py` | Creates the FastAPI app and enables CORS |
-| `backend/app/api/health.py` | `GET /health` |
-| `backend/app/api/integrations.py` | Integration list/create routes |
-| `backend/app/models/integration.py` | Pydantic request/response models |
-| `backend/app/services/integration_store.py` | In-memory store + seed data |
-| `backend/app/core/config.py` | Local CORS settings |
-| `backend/tests/test_api.py` | Basic foundation tests |
-
-## Frontend layout (Day 1)
-
-| Path | Role |
-|------|------|
-| `frontend/src/App.tsx` | Dashboard screen |
-| `frontend/src/api.ts` | Typed HTTP helpers |
-| `frontend/src/types.ts` | TypeScript types matching the API |
-| `frontend/src/components/` | Summary cards, table, and create form |
-
-## Day 1 limitations (intentional)
-
-These are deliberate learning boundaries, not forgotten features:
-
-- **No persistence yet** — data lives only in memory
-- **Data disappears when the backend restarts**
-- **No OAuth** — providers are names only
-- **No external provider API calls** — GitHub/Stripe are not contacted
-- **No webhooks**
-- **No retry system**
-- **No authentication**
-- **No real health calculations yet** — summary cards count statuses only
-
-## Why this shape matters
-
-By keeping Day 1 small, you can see every hop clearly:
+Correct:
 
 ```text
-UI event → HTTP → route → store → response → UI state → render
+React → HTTP → FastAPI → repository → SQLAlchemy → PostgreSQL
 ```
 
-Later milestones will replace the in-memory store with PostgreSQL, then
-add OAuth, provider API checks, webhooks, and recovery workflows one layer
-at a time.
+Incorrect:
+
+```text
+React → PostgreSQL
+```
+
+Reasons:
+
+- Database credentials stay on the backend
+- The API enforces validation and business rules
+- Frontend code does not depend on table schemas
+- The database can evolve without rewriting the UI
+
+## Layers
+
+| Layer | Role |
+|-------|------|
+| Pydantic models (`app/models`) | HTTP request/response validation |
+| ORM models (`app/db/models`) | Table mapping |
+| Repository (`app/repositories`) | Database operations |
+| Routes (`app/api`) | HTTP behavior |
+| Alembic (`alembic/versions`) | Schema history |
+
+## Health vs readiness
+
+- `GET /health` — **liveness**: process is up (does not query Postgres)
+- `GET /ready` — **readiness**: Postgres answers `SELECT 1`
+
+## Day 1 → current change
+
+| Day 1 | Now |
+|-------|-----|
+| `IntegrationStore` + Python list | `IntegrationRepository` + PostgreSQL |
+| Data gone on restart | Data survives backend restart |
+| No migrations | Alembic `001_create_integrations` |
+
+## Intentional non-goals (later milestones)
+
+- GitHub OAuth / Stripe APIs / webhooks
+- Request logging, retries, Redis, queues, AWS
+- Authentication / users
+
+## Related docs
+
+- [database.md](database.md) — Engine, Session, transactions, Alembic learning notes
