@@ -2,6 +2,11 @@
 #
 # Development credentials only — never reuse these in production.
 #
+# PostgreSQL 18 image layout:
+#   PGDATA defaults to /var/lib/postgresql/18/docker
+#   The image VOLUME is /var/lib/postgresql
+# Mount the named volume at /var/lib/postgresql (NOT .../data).
+#
 # WARNING: `docker compose down -v` DESTROYS local database data
 # (named volume postgres_data). Prefer `docker compose stop` or
 # `docker compose down` without `-v` when you want to keep data.
@@ -17,7 +22,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U integrationlab -d integrationlab"]

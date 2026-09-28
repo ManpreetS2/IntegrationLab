@@ -21,7 +21,7 @@ class IntegrationStatus(str, Enum):
 
 
 class IntegrationProvider(str, Enum):
-    """Supported third-party providers for Day 1."""
+    """Currently supported integration providers."""
 
     GITHUB = "github"
     STRIPE = "stripe"

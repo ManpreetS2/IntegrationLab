@@ -37,7 +37,7 @@ See:
 ## Prerequisites
 
 - Python 3.11+ (3.13 works)
-- Node.js 18+
+- Node.js 20.19+ or Node.js 22.12+ (required by Vite 8)
 - Docker Desktop **or** Docker Engine + Compose (for local PostgreSQL)
 
 ## Repository layout
@@ -64,6 +64,10 @@ Development credentials are intentional and **not for production**:
 # from repository root
 docker compose up -d postgres
 ```
+
+PostgreSQL 18 mounts the named volume at `/var/lib/postgresql` (the image's
+declared data root), not the older `/var/lib/postgresql/data` path used by
+PostgreSQL 17 and earlier.
 
 Wait until healthy, then confirm:
 
@@ -156,7 +160,8 @@ Default API URL: `http://localhost:8000` (override with `VITE_API_URL` if needed
 
 ## Testing
 
-Tests use `TEST_DATABASE_URL` / `integrationlab_test` and refuse to run against a non-test database name.
+Tests use `TEST_DATABASE_URL` / `integrationlab_test` and refuse to run unless
+the database name ends with `_test`.
 
 ```bash
 cd backend

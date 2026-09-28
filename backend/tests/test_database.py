@@ -1,8 +1,11 @@
 """Database and repository-level tests."""
 
+import pytest
+
 from app.models.integration import IntegrationCreate, IntegrationProvider
 from app.repositories.integrations import integration_repository
 from app.scripts.seed import seed_integrations
+from tests.conftest import TEST_DATABASE_URL, assert_safe_test_database
 
 
 def test_repository_create_and_list(db_session) -> None:
@@ -33,8 +36,21 @@ def test_seed_is_idempotent(db_session) -> None:
     assert len(integration_repository.list_all(db_session)) == 2
 
 
-def test_test_database_name_contains_test() -> None:
-    """Guardrail documented in conftest — keep this assertion visible."""
-    from tests.conftest import TEST_DATABASE_URL
+def test_safe_test_database_accepts_names_ending_in_test() -> None:
+    assert assert_safe_test_database(TEST_DATABASE_URL) == TEST_DATABASE_URL
+    assert (
+        assert_safe_test_database(
+            "postgresql+psycopg://integrationlab:integrationlab@localhost:5432/my_feature_test"
+        )
+        is not None
+    )
 
-    assert "test" in TEST_DATABASE_URL.lower()
+
+@pytest.mark.parametrize(
+    "unsafe_name",
+    ["integrationlab", "production", "contest_data", "latest"],
+)
+def test_safe_test_database_rejects_unsafe_names(unsafe_name: str) -> None:
+    url = f"postgresql+psycopg://integrationlab:integrationlab@localhost:5432/{unsafe_name}"
+    with pytest.raises(RuntimeError, match="ends with '_test'"):
+        assert_safe_test_database(url)

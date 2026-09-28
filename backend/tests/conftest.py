@@ -2,7 +2,7 @@
 
 Safety rules:
 - Tests use TEST_DATABASE_URL only.
-- The database name must contain "test".
+- The database name must end with `_test`.
 - Never truncate or migrate the developer DATABASE_URL database.
 """
 
@@ -26,19 +26,24 @@ TEST_DATABASE_URL = os.environ.get(
 )
 
 
-def _assert_safe_test_database(url: str) -> str:
-    """Refuse to run destructive fixtures against a non-test database."""
+def assert_safe_test_database(url: str) -> str:
+    """Refuse destructive fixtures unless the DB name clearly ends with `_test`.
+
+    Accepted examples: integrationlab_test, my_feature_test
+    Rejected examples: integrationlab, production, contest_data, latest
+    """
     parsed = urlparse(url.replace("postgresql+psycopg", "postgresql", 1))
     db_name = (parsed.path or "").lstrip("/")
-    if "test" not in db_name.lower():
+    if not db_name.lower().endswith("_test"):
         raise RuntimeError(
             f"Refusing to run tests against database '{db_name}'. "
-            "TEST_DATABASE_URL must point at a database whose name contains 'test'."
+            "TEST_DATABASE_URL must point at a dedicated database whose name "
+            "ends with '_test' (for example: integrationlab_test)."
         )
     return url
 
 
-_assert_safe_test_database(TEST_DATABASE_URL)
+assert_safe_test_database(TEST_DATABASE_URL)
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["TEST_DATABASE_URL"] = TEST_DATABASE_URL
 

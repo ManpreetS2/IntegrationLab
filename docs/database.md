@@ -186,5 +186,5 @@ now would obscure the persistence learning goal.
 
 Pytest uses `integrationlab_test`, not `integrationlab`.
 
-Fixtures refuse to truncate a database whose name does not contain `test`, so a
+Fixtures refuse to truncate a database whose name does not end with `_test`, so a
 misconfigured `TEST_DATABASE_URL` fails loudly instead of wiping demo data.
