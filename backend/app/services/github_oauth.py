@@ -250,32 +250,48 @@ class GitHubOAuthService:
         error: str,
         error_description: str | None,
     ) -> RedirectResponse:
-        """Handle GitHub OAuth denial/cancel without exposing raw descriptions."""
-        # error_description is intentionally unused in redirects/logs (may be noisy).
+        """Handle GitHub OAuth denial/cancel without exposing raw descriptions.
+
+        Only treat the callback as one of our initiated flows when `state` is
+        present, known, unused, unexpired, and provider=github. Otherwise 400.
+        """
+        # Never echo GitHub's error_description to the browser or API clients.
         _ = error_description
 
-        if state:
-            oauth_session = oauth_session_repository.get_by_state_hash(
-                session,
-                hash_oauth_state(state),
+        if not state:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth state",
             )
-            if (
-                oauth_session is not None
-                and oauth_session.used_at is None
-                and oauth_session.provider == IntegrationProvider.GITHUB.value
-            ):
-                now = datetime.now(timezone.utc)
-                expires_at = oauth_session.expires_at
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if expires_at >= now:
-                    oauth_session_repository.mark_used(session, oauth_session)
-                    session.commit()
-                    logger.info(
-                        "GitHub OAuth cancelled for integration %s (error=%s)",
-                        oauth_session.integration_id,
-                        error,
-                    )
+
+        oauth_session = oauth_session_repository.get_by_state_hash(
+            session,
+            hash_oauth_state(state),
+        )
+        if oauth_session is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
+        if oauth_session.provider != IntegrationProvider.GITHUB.value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
+        if oauth_session.used_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth state already used",
+            )
+
+        now = datetime.now(timezone.utc)
+        expires_at = oauth_session.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < now:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OAuth state expired")
+
+        oauth_session_repository.mark_used(session, oauth_session)
+        session.commit()
+        logger.info(
+            "GitHub OAuth cancelled for integration %s (error=%s)",
+            oauth_session.integration_id,
+            error,
+        )
 
         redirect_status = "cancelled" if error == "access_denied" else "error"
         query = urlencode({"oauth": "github", "status": redirect_status})
