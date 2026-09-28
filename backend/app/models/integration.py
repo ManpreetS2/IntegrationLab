@@ -1,7 +1,7 @@
-"""Pydantic models for integrations.
+"""Pydantic API models for integrations.
 
-These models define the shape of data the API accepts and returns.
-Day 1 keeps the schema small on purpose.
+These describe HTTP request/response shapes. They are intentionally
+separate from SQLAlchemy ORM models.
 """
 
 from datetime import datetime
@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class IntegrationStatus(str, Enum):
@@ -44,7 +44,9 @@ class IntegrationCreate(BaseModel):
 
 
 class Integration(BaseModel):
-    """Full integration record stored and returned by the API."""
+    """Full integration record returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     name: str

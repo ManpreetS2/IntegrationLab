@@ -51,5 +51,9 @@ pnpm-debug.log*
 *.log
 logs/
 
-# Docker local leftovers (not required for Day 1)
+# Docker / local database leftovers
 docker-data/
+
+# Alembic / local override
+backend/.env
+.env.local

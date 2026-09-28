@@ -1,5 +1,30 @@
-# Day 1 placeholder only.
-# Docker is NOT required to run IntegrationLab yet.
-# Later milestones may define real services here.
+# PostgreSQL for local IntegrationLab development.
+#
+# Development credentials only — never reuse these in production.
+#
+# WARNING: `docker compose down -v` DESTROYS local database data
+# (named volume postgres_data). Prefer `docker compose stop` or
+# `docker compose down` without `-v` when you want to keep data.
 
-services: {}
+services:
+  postgres:
+    image: postgres:18
+    container_name: integrationlab-postgres
+    environment:
+      POSTGRES_USER: integrationlab
+      POSTGRES_PASSWORD: integrationlab
+      POSTGRES_DB: integrationlab
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U integrationlab -d integrationlab"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres_data:
