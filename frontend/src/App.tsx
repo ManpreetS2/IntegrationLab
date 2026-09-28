@@ -11,6 +11,7 @@ import FailureLabPanel from './components/FailureLabPanel'
 import GitHubConnectionPanel from './components/GitHubConnectionPanel'
 import IntegrationsTable from './components/IntegrationsTable'
 import ProviderRequestsTable from './components/ProviderRequestsTable'
+import StripeWebhooksPanel from './components/StripeWebhooksPanel'
 import SummaryCards from './components/SummaryCards'
 import type { Integration, IntegrationProvider, ProviderRequestLog } from './types'
 
@@ -155,12 +156,21 @@ function App() {
             </section>
 
             <section className="panel">
+              <h2>Stripe Webhooks</h2>
+              <StripeWebhooksPanel integrations={integrations} />
+            </section>
+
+            <section className="panel">
               <div className="panel-header">
                 <h2>Recent provider requests</h2>
                 <button type="button" className="secondary-button" onClick={() => void loadIntegrations()}>
                   Refresh logs
                 </button>
               </div>
+              <p className="muted">
+                Outbound calls IntegrationLab makes to providers. Inbound Stripe webhooks appear in
+                the Stripe Webhooks section instead.
+              </p>
               <ProviderRequestsTable logs={requestLogs} />
             </section>
 

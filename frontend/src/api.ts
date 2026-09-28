@@ -10,7 +10,12 @@ import type {
   HealthResponse,
   Integration,
   IntegrationCreateRequest,
+  ProcessDueResult,
   ProviderRequestLog,
+  WebhookEventDetail,
+  WebhookEventSummary,
+  WebhookProcessingStatus,
+  WebhookSummary,
 } from './types'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -115,6 +120,51 @@ export function listFailureRuns(params?: {
 
 export function getFailureRun(runId: string): Promise<FailureLabRun> {
   return request<FailureLabRun>(`/api/failure-lab/runs/${runId}`)
+}
+
+const WEBHOOKS = '/api/webhooks/stripe'
+
+export function getWebhookSummary(): Promise<WebhookSummary> {
+  return request<WebhookSummary>(`${WEBHOOKS}/summary`)
+}
+
+export function listWebhookEvents(params?: {
+  status?: WebhookProcessingStatus
+  event_type?: string
+  integration_id?: string
+  limit?: number
+}): Promise<WebhookEventSummary[]> {
+  const search = new URLSearchParams()
+  if (params?.status) search.set('status', params.status)
+  if (params?.event_type) search.set('event_type', params.event_type)
+  if (params?.integration_id) search.set('integration_id', params.integration_id)
+  if (params?.limit) search.set('limit', String(params.limit))
+  const query = search.toString()
+  return request<WebhookEventSummary[]>(`${WEBHOOKS}/events${query ? `?${query}` : ''}`)
+}
+
+export function listFailedWebhookEvents(limit = 50): Promise<WebhookEventSummary[]> {
+  return request<WebhookEventSummary[]>(`${WEBHOOKS}/failed?limit=${limit}`)
+}
+
+export function getWebhookEvent(eventId: string): Promise<WebhookEventDetail> {
+  return request<WebhookEventDetail>(`${WEBHOOKS}/events/${eventId}`)
+}
+
+export function processWebhookEvent(eventId: string): Promise<WebhookEventDetail> {
+  return request<WebhookEventDetail>(`${WEBHOOKS}/events/${eventId}/process`, { method: 'POST' })
+}
+
+export function retryWebhookEvent(eventId: string): Promise<WebhookEventDetail> {
+  return request<WebhookEventDetail>(`${WEBHOOKS}/events/${eventId}/retry`, { method: 'POST' })
+}
+
+export function dismissWebhookEvent(eventId: string): Promise<WebhookEventDetail> {
+  return request<WebhookEventDetail>(`${WEBHOOKS}/events/${eventId}/dismiss`, { method: 'POST' })
+}
+
+export function processDueWebhookEvents(limit = 25): Promise<ProcessDueResult> {
+  return request<ProcessDueResult>(`${WEBHOOKS}/process-due?limit=${limit}`, { method: 'POST' })
 }
 
 export { API_URL }
