@@ -1,0 +1,5 @@
+# Day 1 placeholder only.
+# Docker is NOT required to run IntegrationLab yet.
+# Later milestones may define real services here.
+
+services: {}
