@@ -371,6 +371,122 @@ button:disabled {
   color: #c3d0e4;
 }
 
+.source-badge {
+  display: inline-flex;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.source-real {
+  background: rgba(61, 126, 166, 0.25);
+  color: #9ec9e8;
+}
+
+.source-simulated {
+  background: rgba(166, 112, 36, 0.25);
+  color: #f0c987;
+}
+
+.failure-lab {
+  display: grid;
+  gap: 1rem;
+}
+
+.failure-lab-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.failure-lab-controls label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #c3d0e4;
+}
+
+.failure-lab-controls select {
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid #2a3548;
+  background: #0f141c;
+  color: #e8edf5;
+}
+
+.scenario-hint {
+  margin: 0;
+}
+
+.failure-result {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.failure-observed,
+.failure-diagnosis {
+  border: 1px solid #2a3548;
+  border-radius: 10px;
+  padding: 1rem;
+  background: #121821;
+}
+
+.failure-observed h3,
+.failure-diagnosis h3,
+.failure-history h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.failure-diagnosis h4 {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.diagnosis-title {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+  color: #f0c987;
+}
+
+.result-grid {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.result-grid div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.result-grid dt {
+  color: #93a4bd;
+  font-size: 0.8rem;
+}
+
+.result-grid dd {
+  margin: 0;
+}
+
+.failure-diagnosis ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.linkish-button {
+  background: none;
+  border: none;
+  color: #9ec9e8;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
 .banner p,
 .loading-text,
 .empty-state,

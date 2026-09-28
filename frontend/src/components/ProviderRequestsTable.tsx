@@ -7,7 +7,12 @@ interface ProviderRequestsTableProps {
 function statusClass(statusCode: number | null): string {
   if (statusCode === null) return 'log-status-transport'
   if (statusCode >= 200 && statusCode < 300) return 'log-status-ok'
-  if (statusCode === 401 || statusCode === 403 || statusCode === 429 || (statusCode >= 400 && statusCode < 500)) {
+  if (
+    statusCode === 401 ||
+    statusCode === 403 ||
+    statusCode === 429 ||
+    (statusCode >= 400 && statusCode < 500)
+  ) {
     return 'log-status-warn'
   }
   return 'log-status-error'
@@ -23,6 +28,7 @@ function ProviderRequestsTable({ logs }: ProviderRequestsTableProps) {
       <table className="integrations-table">
         <thead>
           <tr>
+            <th scope="col">Source</th>
             <th scope="col">Provider</th>
             <th scope="col">Method</th>
             <th scope="col">Endpoint</th>
@@ -30,11 +36,17 @@ function ProviderRequestsTable({ logs }: ProviderRequestsTableProps) {
             <th scope="col">Latency</th>
             <th scope="col">Time</th>
             <th scope="col">Error</th>
+            <th scope="col">Scenario</th>
           </tr>
         </thead>
         <tbody>
           {logs.map((log) => (
             <tr key={log.id}>
+              <td>
+                <span className={`source-badge ${log.is_simulated ? 'source-simulated' : 'source-real'}`}>
+                  {log.is_simulated ? 'Simulated' : 'Real'}
+                </span>
+              </td>
               <td>{log.provider}</td>
               <td>{log.method}</td>
               <td>{log.endpoint}</td>
@@ -46,6 +58,7 @@ function ProviderRequestsTable({ logs }: ProviderRequestsTableProps) {
               <td>{log.latency_ms}ms</td>
               <td>{new Date(log.timestamp).toLocaleString()}</td>
               <td>{log.error_message ?? '—'}</td>
+              <td>{log.scenario ?? '—'}</td>
             </tr>
           ))}
         </tbody>

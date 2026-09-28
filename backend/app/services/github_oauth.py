@@ -97,8 +97,23 @@ class GitHubOAuthService:
         *,
         code: str | None,
         state: str | None,
+        error: str | None = None,
+        error_description: str | None = None,
     ) -> RedirectResponse:
-        """Validate OAuth session, exchange code, fetch /user, persist connection."""
+        """Validate OAuth session, exchange code, fetch /user, persist connection.
+
+        GitHub may redirect with error=access_denied when the user cancels.
+        We never surface raw error_description to the frontend.
+        """
+        # User cancelled / denied — redirect safely without creating credentials.
+        if error:
+            return self._handle_oauth_error(
+                session,
+                state=state,
+                error=error,
+                error_description=error_description,
+            )
+
         self.require_oauth_config()
         if not code or not state:
             raise HTTPException(
@@ -159,6 +174,7 @@ class GitHubOAuthService:
 
         token_type = token_result.data.get("token_type")
         scope_value = token_result.data.get("scope")
+        # Store whatever GitHub actually granted (may be narrower than requested).
         granted_scopes = scope_value if isinstance(scope_value, str) else None
 
         user_result = self.client.get_authenticated_user(
@@ -221,6 +237,48 @@ class GitHubOAuthService:
 
         logger.info("GitHub OAuth connected for integration %s", integration.id)
         query = urlencode({"oauth": "github", "status": "connected"})
+        return RedirectResponse(
+            url=f"{self.settings.frontend_url.rstrip('/')}/?{query}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    def _handle_oauth_error(
+        self,
+        session: Session,
+        *,
+        state: str | None,
+        error: str,
+        error_description: str | None,
+    ) -> RedirectResponse:
+        """Handle GitHub OAuth denial/cancel without exposing raw descriptions."""
+        # error_description is intentionally unused in redirects/logs (may be noisy).
+        _ = error_description
+
+        if state:
+            oauth_session = oauth_session_repository.get_by_state_hash(
+                session,
+                hash_oauth_state(state),
+            )
+            if (
+                oauth_session is not None
+                and oauth_session.used_at is None
+                and oauth_session.provider == IntegrationProvider.GITHUB.value
+            ):
+                now = datetime.now(timezone.utc)
+                expires_at = oauth_session.expires_at
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at >= now:
+                    oauth_session_repository.mark_used(session, oauth_session)
+                    session.commit()
+                    logger.info(
+                        "GitHub OAuth cancelled for integration %s (error=%s)",
+                        oauth_session.integration_id,
+                        error,
+                    )
+
+        redirect_status = "cancelled" if error == "access_denied" else "error"
+        query = urlencode({"oauth": "github", "status": redirect_status})
         return RedirectResponse(
             url=f"{self.settings.frontend_url.rstrip('/')}/?{query}",
             status_code=status.HTTP_302_FOUND,

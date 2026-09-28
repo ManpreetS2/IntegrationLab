@@ -158,6 +158,8 @@ class ProviderRequestLogRepository:
         latency_ms: int,
         error_message: str | None = None,
         rate_limit_remaining: int | None = None,
+        is_simulated: bool = False,
+        scenario: str | None = None,
     ) -> ProviderRequestLogORM:
         row = ProviderRequestLogORM(
             id=uuid4(),
@@ -170,6 +172,8 @@ class ProviderRequestLogRepository:
             timestamp=datetime.now(timezone.utc),
             error_message=error_message,
             rate_limit_remaining=rate_limit_remaining,
+            is_simulated=is_simulated,
+            scenario=scenario,
         )
         session.add(row)
         session.flush()
@@ -182,6 +186,8 @@ class ProviderRequestLogRepository:
         provider: str | None = None,
         integration_id: UUID | None = None,
         limit: int = 50,
+        is_simulated: bool | None = None,
+        scenario: str | None = None,
     ) -> list[ProviderRequestLogORM]:
         statement = select(ProviderRequestLogORM).order_by(
             ProviderRequestLogORM.timestamp.desc()
@@ -192,6 +198,10 @@ class ProviderRequestLogRepository:
             statement = statement.where(
                 ProviderRequestLogORM.integration_id == integration_id
             )
+        if is_simulated is not None:
+            statement = statement.where(ProviderRequestLogORM.is_simulated == is_simulated)
+        if scenario:
+            statement = statement.where(ProviderRequestLogORM.scenario == scenario)
         statement = statement.limit(limit)
         return list(session.scalars(statement).all())
 

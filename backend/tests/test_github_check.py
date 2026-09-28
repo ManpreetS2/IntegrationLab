@@ -124,7 +124,11 @@ def test_provider_request_logs_recorded_and_listed(client, db_session, github_in
             "timestamp",
             "error_message",
             "rate_limit_remaining",
+            "is_simulated",
+            "scenario",
         }
+        assert row["is_simulated"] is False
+        assert row["scenario"] is None
 
     endpoints = {row["endpoint"] for row in logs}
     assert "/user" in endpoints

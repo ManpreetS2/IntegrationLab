@@ -4,6 +4,16 @@ export type IntegrationStatus = 'not_connected' | 'connected' | 'needs_setup'
 
 export type IntegrationProvider = 'github' | 'stripe'
 
+export type FailureScenarioId =
+  | 'unauthorized_401'
+  | 'forbidden_403'
+  | 'not_found_404'
+  | 'rate_limited_429'
+  | 'provider_500'
+  | 'timeout'
+  | 'malformed_json'
+  | 'transport_error'
+
 export interface Integration {
   id: string
   name: string
@@ -55,4 +65,52 @@ export interface ProviderRequestLog {
   timestamp: string
   error_message: string | null
   rate_limit_remaining: number | null
+  is_simulated: boolean
+  scenario: string | null
+}
+
+export interface FailureScenarioInfo {
+  id: FailureScenarioId
+  label: string
+  description: string
+}
+
+export interface FailureLabRun {
+  id: string
+  integration_id: string
+  provider: string
+  scenario: FailureScenarioId
+  request: {
+    method: string
+    endpoint: string
+  }
+  observed: {
+    status_code: number | null
+    latency_ms: number
+    error_code: string | null
+    rate_limit_remaining: number | null
+  }
+  diagnosis: {
+    code: string
+    title: string
+    summary: string
+    retryable: boolean
+    evidence: string[]
+    recommended_checks: string[]
+  }
+  created_at: string
+}
+
+export interface FailureLabRunListItem {
+  id: string
+  integration_id: string
+  provider: string
+  scenario: FailureScenarioId
+  status_code: number | null
+  latency_ms: number
+  error_code: string | null
+  diagnosis_code: string
+  diagnosis_title: string
+  retryable: boolean
+  created_at: string
 }

@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -119,3 +120,5 @@ class ProviderRequestLogORM(Base):
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     rate_limit_remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_simulated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    scenario: Mapped[str | None] = mapped_column(String(64), nullable=True)

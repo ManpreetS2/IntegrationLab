@@ -49,3 +49,5 @@ class ProviderRequestLogResponse(BaseModel):
     timestamp: datetime
     error_message: str | None = None
     rate_limit_remaining: int | None = None
+    is_simulated: bool = False
+    scenario: str | None = None

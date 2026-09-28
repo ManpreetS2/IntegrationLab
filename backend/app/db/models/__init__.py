@@ -3,6 +3,7 @@
 Import models here so Alembic and Base.metadata see them.
 """
 
+from app.db.models.failure_lab import FailureLabRunORM
 from app.db.models.integration import IntegrationORM
 from app.db.models.oauth import (
     GitHubProfileORM,
@@ -17,4 +18,5 @@ __all__ = [
     "OAuthCredentialORM",
     "GitHubProfileORM",
     "ProviderRequestLogORM",
+    "FailureLabRunORM",
 ]
