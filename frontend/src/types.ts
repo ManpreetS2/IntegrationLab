@@ -21,3 +21,38 @@ export interface IntegrationCreateRequest {
 export interface HealthResponse {
   status: string
 }
+
+export interface GitHubConnection {
+  integration_id: string
+  connected: boolean
+  login: string | null
+  avatar_url: string | null
+  html_url: string | null
+  public_repos: number | null
+  granted_scopes: string[]
+  connected_at: string | null
+  last_synced_at: string | null
+  status: string | null
+}
+
+export interface GitHubCheckResult {
+  ok: boolean
+  status: string
+  login: string | null
+  public_repos: number | null
+  last_checked_at: string | null
+  error: string | null
+}
+
+export interface ProviderRequestLog {
+  id: string
+  integration_id: string | null
+  provider: string
+  method: string
+  endpoint: string
+  status_code: number | null
+  latency_ms: number
+  timestamp: string
+  error_message: string | null
+  rate_limit_remaining: number | null
+}

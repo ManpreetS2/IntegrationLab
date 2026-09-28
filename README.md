@@ -1,44 +1,48 @@
 # IntegrationLab
 
-IntegrationLab is a partner-integration reliability console for connecting, monitoring, debugging, and recovering third-party API and webhook integrations.
+IntegrationLab is a partner-integration reliability console for connecting,
+monitoring, debugging, and recovering third-party API and webhook integrations.
 
-This repository is being built step-by-step as a learning project. The current milestone replaces Day 1 in-memory storage with durable **PostgreSQL** persistence.
+This repository is built milestone-by-milestone. The current milestone adds
+**GitHub OAuth** and **provider request observability** on top of PostgreSQL
+persistence.
 
-## Current milestone: PostgreSQL persistence
+## Current milestone: GitHub OAuth + provider observability
 
 Working pieces:
 
-- React + TypeScript frontend (Vite) — same API contract as Day 1
-- FastAPI backend with Pydantic request/response models
-- SQLAlchemy 2.x ORM + repository data-access layer
-- PostgreSQL 18 via Docker Compose
-- Alembic migrations (no runtime `create_all()`)
-- Idempotent seed for GitHub and Stripe demo integrations
-- Liveness (`GET /health`) and readiness (`GET /ready`)
-- Isolated PostgreSQL test database for Pytest
+- React + TypeScript frontend (Vite)
+- FastAPI backend with Pydantic schemas
+- SQLAlchemy 2.x + repository layer + PostgreSQL + Alembic
+- GitHub OAuth authorization-code flow (`state` + PKCE S256)
+- Encrypted access-token storage (Fernet)
+- Authenticated GitHub `GET /user`
+- GitHub connection profile + manual **Check connection**
+- Provider API request logging (status, latency, safe errors)
+- Isolated PostgreSQL test database with mocked GitHub HTTP (`respx`)
 
 ## Architecture
 
 ```text
 Browser
   → React (http://localhost:5173)
-  → HTTP/JSON
   → FastAPI (http://localhost:8000)
-  → repository / data access
-  → SQLAlchemy
-  → PostgreSQL
+  → GitHub OAuth / REST API
+  → PostgreSQL (credentials / profile / logs)
 ```
 
 See:
 
-- [docs/architecture.md](docs/architecture.md) — request path
-- [docs/database.md](docs/database.md) — Engine, Session, transactions, Alembic
+- [docs/architecture.md](docs/architecture.md)
+- [docs/database.md](docs/database.md)
+- [docs/github-oauth.md](docs/github-oauth.md) — OAuth App setup + security notes
 
 ## Prerequisites
 
 - Python 3.11+ (3.13 works)
 - Node.js 20.19+ or Node.js 22.12+ (required by Vite 8)
 - Docker Desktop **or** Docker Engine + Compose (for local PostgreSQL)
+  - Local Postgres.app / Homebrew Postgres also works if `DATABASE_URL` matches
 
 ## Repository layout
 
@@ -46,7 +50,7 @@ See:
 integrationlab/
   backend/          FastAPI + SQLAlchemy + Alembic + Pytest
   frontend/         React + TypeScript (Vite)
-  docs/             Architecture + database learning notes
+  docs/             Architecture, database, GitHub OAuth notes
   docker/postgres/  First-boot DB init (creates integrationlab_test)
   docker-compose.yml
   .env.example
@@ -61,47 +65,31 @@ Development credentials are intentional and **not for production**:
 - test db: `integrationlab_test` (created on first volume init)
 
 ```bash
-# from repository root
 docker compose up -d postgres
 ```
 
-PostgreSQL 18 mounts the named volume at `/var/lib/postgresql` (the image's
-declared data root), not the older `/var/lib/postgresql/data` path used by
-PostgreSQL 17 and earlier.
-
-Wait until healthy, then confirm:
-
-```bash
-docker compose ps
-docker compose exec postgres pg_isready -U integrationlab -d integrationlab
-```
-
-### Data survival / destructive reset
-
-- `docker compose stop` or `docker compose down` — keeps the named volume (`postgres_data`)
-- `docker compose down -v` — **DESTROYS** local database data
-
-Manual destructive reset (explicit only):
-
-```bash
-docker compose down -v
-docker compose up -d postgres
-cd backend
-source .venv/bin/activate
-alembic upgrade head
-python -m app.scripts.seed
-```
+PostgreSQL 18 mounts the named volume at `/var/lib/postgresql`.
 
 ## Environment setup
 
 ```bash
-# from repository root
 cp .env.example backend/.env
 ```
 
-Do **not** commit `backend/.env`.
+Required for persistence:
 
-Default values point at the Docker Compose Postgres instance.
+- `DATABASE_URL`
+- `TEST_DATABASE_URL` (for pytest; DB name must end with `_test`)
+
+Optional until you connect GitHub (app still boots; OAuth routes return 503):
+
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `GITHUB_OAUTH_REDIRECT_URI` (default `http://localhost:8000/api/oauth/github/callback`)
+- `FRONTEND_URL` (default `http://localhost:5173`)
+- `TOKEN_ENCRYPTION_KEY` (Fernet key — see [docs/github-oauth.md](docs/github-oauth.md))
+
+Do **not** commit `backend/.env`.
 
 ## Backend setup
 
@@ -110,33 +98,8 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### Migrations
-
-```bash
-cd backend
-source .venv/bin/activate
 alembic upgrade head
-```
-
-Alembic applies checked-in migration files. Editing an ORM class alone does **not** change an existing database.
-
-### Seed demo data
-
-```bash
-cd backend
-source .venv/bin/activate
 python -m app.scripts.seed
-```
-
-Idempotent: running seed again does not create duplicate GitHub/Stripe rows.
-
-### Run the API
-
-```bash
-cd backend
-source .venv/bin/activate
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -156,23 +119,27 @@ npm run dev
 
 App URL: `http://localhost:5173`
 
-Default API URL: `http://localhost:8000` (override with `VITE_API_URL` if needed).
+## GitHub OAuth setup (real flow)
+
+Follow [docs/github-oauth.md](docs/github-oauth.md):
+
+1. Create a GitHub OAuth App
+2. Homepage: `http://localhost:5173`
+3. Callback: `http://localhost:8000/api/oauth/github/callback`
+4. Set client id/secret + Fernet key in `backend/.env`
+5. Restart backend, click **Connect GitHub** on the dashboard
 
 ## Testing
-
-Tests use `TEST_DATABASE_URL` / `integrationlab_test` and refuse to run unless
-the database name ends with `_test`.
 
 ```bash
 cd backend
 source .venv/bin/activate
-# ensure Postgres is up and migrations can run against the test DB
 export DATABASE_URL=postgresql+psycopg://integrationlab:integrationlab@localhost:5432/integrationlab
 export TEST_DATABASE_URL=postgresql+psycopg://integrationlab:integrationlab@localhost:5432/integrationlab_test
 pytest
 ```
 
-Frontend checks:
+Frontend:
 
 ```bash
 cd frontend
@@ -180,27 +147,26 @@ npm run lint
 npm run build
 ```
 
-## Database inspection (independent of React/FastAPI)
+## Current features
 
-```bash
-docker compose exec postgres psql -U integrationlab -d integrationlab
-```
+- PostgreSQL persistence
+- OAuth authorization-code flow
+- `state` + PKCE
+- Encrypted token at rest
+- Authenticated GitHub API (`/user`)
+- GitHub profile metadata
+- Provider request logging
+- Manual connection checks
 
-Then:
+## Current non-features (intentional)
 
-```sql
-SELECT id, name, provider, status, created_at
-FROM integrations;
-```
-
-## Current limitations (intentional)
-
-- No OAuth / no real GitHub or Stripe API calls
-- No webhooks, retries, Redis, queues, or AWS
-- No authentication / users
-- No API request logging yet
-- provider/status stored as strings (not Postgres native ENUMs)
+- Failure Lab simulators
+- Stripe API / webhooks
+- Retries / exponential backoff / DLQ
+- Redis / queues / workers
+- AWS
+- Application user accounts / login
 
 ## Next milestone
 
-GitHub OAuth + first real provider connection.
+**Failure Lab** — controlled provider failure simulations and recovery tooling.
