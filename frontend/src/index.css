@@ -1,0 +1,294 @@
+:root {
+  color: #e8edf5;
+  background: #0f141c;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 35%),
+    #0f141c;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: flex-start;
+  margin-bottom: 1.75rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  color: #93a4bd;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+h1 {
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: 1.15rem;
+}
+
+.header-meta {
+  text-align: right;
+}
+
+.status-chip {
+  display: inline-block;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid #2a3548;
+  background: #171e29;
+  font-size: 0.9rem;
+}
+
+.status-chip-ok {
+  border-color: #1f6f4a;
+  background: rgba(31, 111, 74, 0.2);
+  color: #8dffc3;
+}
+
+.status-chip-error {
+  border-color: #8a3b3b;
+  background: rgba(138, 59, 59, 0.2);
+  color: #ffb4b4;
+}
+
+.status-chip-checking {
+  color: #c7d2e3;
+}
+
+.muted {
+  color: #93a4bd;
+}
+
+.api-url {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+.app-main {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.summary-card,
+.panel,
+.banner {
+  background: #171e29;
+  border: 1px solid #2a3548;
+  border-radius: 12px;
+}
+
+.summary-card {
+  padding: 1rem 1.1rem;
+}
+
+.summary-label {
+  margin: 0;
+  color: #93a4bd;
+  font-size: 0.9rem;
+}
+
+.summary-value {
+  margin: 0.35rem 0 0;
+  font-size: 1.8rem;
+  font-weight: 650;
+}
+
+.panel {
+  padding: 1.1rem 1.2rem 1.25rem;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.integrations-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.integrations-table th,
+.integrations-table td {
+  padding: 0.75rem 0.5rem;
+  border-bottom: 1px solid #273246;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.integrations-table th {
+  color: #93a4bd;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.provider-cell {
+  text-transform: capitalize;
+  font-weight: 600;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  text-transform: capitalize;
+  background: #243044;
+}
+
+.status-not_connected,
+.status-needs_setup {
+  background: rgba(180, 120, 40, 0.2);
+  color: #ffd089;
+}
+
+.status-connected {
+  background: rgba(31, 111, 74, 0.2);
+  color: #8dffc3;
+}
+
+.create-form {
+  display: grid;
+  gap: 0.85rem;
+  max-width: 420px;
+}
+
+.create-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: #c7d2e3;
+  font-size: 0.92rem;
+}
+
+.create-form input,
+.create-form select {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #2f3d55;
+  background: #0f141c;
+  color: #e8edf5;
+}
+
+button {
+  width: fit-content;
+  border: 1px solid #3b82f6;
+  background: #2563eb;
+  color: white;
+  border-radius: 8px;
+  padding: 0.6rem 0.95rem;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondary-button {
+  background: transparent;
+  border-color: #3a4a63;
+  color: #e8edf5;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: #1d2635;
+}
+
+.banner {
+  padding: 1rem 1.1rem;
+}
+
+.banner-error {
+  border-color: #8a3b3b;
+  background: rgba(138, 59, 59, 0.15);
+}
+
+.banner p,
+.loading-text,
+.empty-state,
+.error-text {
+  margin: 0.4rem 0 0.75rem;
+}
+
+.error-text {
+  color: #ffb4b4;
+}
+
+.loading-text,
+.empty-state {
+  color: #93a4bd;
+}
+
+@media (max-width: 800px) {
+  .app-header {
+    flex-direction: column;
+  }
+
+  .header-meta {
+    text-align: left;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
