@@ -5,7 +5,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import github, health, integrations, oauth, provider_requests
+from app.api import failure_lab, github, health, integrations, oauth, provider_requests
 from app.core.config import get_settings
 
 logging.basicConfig(
@@ -17,8 +17,8 @@ settings = get_settings()
 
 app = FastAPI(
     title="IntegrationLab",
-    description="Partner-integration reliability console (GitHub OAuth + observability)",
-    version="0.3.0",
+    description="Partner-integration reliability console (Failure Lab + GitHub OAuth)",
+    version="0.4.0",
 )
 
 app.add_middleware(
@@ -34,3 +34,4 @@ app.include_router(integrations.router)
 app.include_router(github.router)
 app.include_router(oauth.router)
 app.include_router(provider_requests.router)
+app.include_router(failure_lab.router)

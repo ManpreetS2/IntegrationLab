@@ -7,6 +7,7 @@ import {
   listProviderRequests,
 } from './api'
 import CreateIntegrationForm from './components/CreateIntegrationForm'
+import FailureLabPanel from './components/FailureLabPanel'
 import GitHubConnectionPanel from './components/GitHubConnectionPanel'
 import IntegrationsTable from './components/IntegrationsTable'
 import ProviderRequestsTable from './components/ProviderRequestsTable'
@@ -15,10 +16,12 @@ import type { Integration, IntegrationProvider, ProviderRequestLog } from './typ
 
 function readOauthNotice(): string | null {
   const params = new URLSearchParams(window.location.search)
-  if (params.get('oauth') === 'github' && params.get('status') === 'connected') {
-    window.history.replaceState({}, '', window.location.pathname)
-    return 'GitHub connected successfully.'
-  }
+  if (params.get('oauth') !== 'github') return null
+  const status = params.get('status')
+  window.history.replaceState({}, '', window.location.pathname)
+  if (status === 'connected') return 'GitHub connected successfully.'
+  if (status === 'cancelled') return 'GitHub connection was cancelled.'
+  if (status === 'error') return 'GitHub authorization did not complete.'
   return null
 }
 
@@ -56,8 +59,6 @@ function App() {
   }, [loadIntegrations])
 
   async function handleCreate(name: string, provider: IntegrationProvider) {
-    // Use the POST response directly so a later refresh failure cannot
-    // make a successful create look like it failed (and invite duplicates).
     const created = await createIntegration({ name, provider })
     setIntegrations((current) => [...current, created])
   }
@@ -66,6 +67,8 @@ function App() {
     () => integrations.filter((item) => item.provider === 'github'),
     [integrations],
   )
+
+  const noticeIsError = oauthNotice?.includes('cancelled') || oauthNotice?.includes('did not complete')
 
   return (
     <div className="app-shell">
@@ -89,7 +92,10 @@ function App() {
 
       <main className="app-main">
         {oauthNotice ? (
-          <div className="banner banner-success" role="status">
+          <div
+            className={`banner ${noticeIsError ? 'banner-error' : 'banner-success'}`}
+            role="status"
+          >
             <strong>{oauthNotice}</strong>
             <button type="button" className="secondary-button" onClick={() => setOauthNotice(null)}>
               Dismiss
@@ -126,7 +132,9 @@ function App() {
             {githubIntegrations.length > 0 ? (
               <section className="panel">
                 <h2>GitHub connections</h2>
-                <p className="muted">Connect a GitHub OAuth App with read:user scope. Tokens never reach the browser.</p>
+                <p className="muted">
+                  Connect a GitHub OAuth App with read:user scope. Tokens never reach the browser.
+                </p>
                 <div className="github-list">
                   {githubIntegrations.map((integration) => (
                     <article key={integration.id} className="github-card">
@@ -140,6 +148,11 @@ function App() {
                 </div>
               </section>
             ) : null}
+
+            <section className="panel">
+              <h2>Failure Lab</h2>
+              <FailureLabPanel integrations={integrations} onCompleted={loadIntegrations} />
+            </section>
 
             <section className="panel">
               <div className="panel-header">

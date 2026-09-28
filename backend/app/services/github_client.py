@@ -28,7 +28,7 @@ REQUEST_TIMEOUT = 15.0
 
 @dataclass
 class ProviderHttpResult:
-    """Outcome of one outbound provider HTTP call."""
+    """Normalized outcome of one outbound provider HTTP call (real or simulated)."""
 
     ok: bool
     status_code: int | None
@@ -37,25 +37,95 @@ class ProviderHttpResult:
     error_code: str | None
     rate_limit_remaining: int | None = None
     headers: dict[str, str] | None = None
+    malformed_body: bool = False
 
 
-def classify_github_error(status_code: int | None, *, timed_out: bool = False) -> str:
-    """Map transport/HTTP outcomes to safe error labels for logs/API."""
+def classify_github_error(
+    status_code: int | None,
+    *,
+    timed_out: bool = False,
+    rate_limit_remaining: int | None = None,
+    malformed_body: bool = False,
+    oauth_error: bool = False,
+) -> str:
+    """Map transport/HTTP/application outcomes to safe error labels."""
     if timed_out:
         return "github_timeout"
     if status_code is None:
         return "github_transport_error"
+    if oauth_error:
+        return "github_oauth_error"
+    if malformed_body:
+        return "github_malformed_json"
     if status_code == 401:
         return "github_unauthorized"
-    if status_code == 403:
-        return "github_forbidden"
     if status_code == 429:
         return "github_rate_limited"
+    if status_code == 403 and rate_limit_remaining == 0:
+        return "github_rate_limited"
+    if status_code == 403:
+        return "github_forbidden"
+    if status_code == 404:
+        return "github_not_found"
     if status_code >= 500:
         return "github_server_error"
     if status_code >= 400:
         return "github_client_error"
     return "github_error"
+
+
+def normalize_json_response(
+    *,
+    status_code: int,
+    raw_text: str | None,
+    parsed: dict[str, Any] | list[Any] | None,
+    parse_failed: bool,
+    rate_limit_remaining: int | None,
+    expect_json: bool,
+    oauth_token_endpoint: bool = False,
+) -> tuple[bool, dict[str, Any] | None, str | None, bool]:
+    """Derive ok / data / error_code / malformed from HTTP + body evidence.
+
+    HTTP 2xx is not enough: OAuth error JSON and malformed bodies are failures.
+    """
+    data: dict[str, Any] | None
+    if isinstance(parsed, dict):
+        data = parsed
+    elif parsed is not None:
+        data = {"value": parsed}
+    else:
+        data = None
+
+    if expect_json and parse_failed:
+        return (
+            False,
+            None,
+            classify_github_error(
+                status_code,
+                malformed_body=True,
+                rate_limit_remaining=rate_limit_remaining,
+            ),
+            True,
+        )
+
+    if oauth_token_endpoint and isinstance(data, dict) and isinstance(data.get("error"), str):
+        # GitHub token endpoint often returns HTTP 200 with {"error": "..."}.
+        return (
+            False,
+            data,
+            classify_github_error(status_code, oauth_error=True),
+            False,
+        )
+
+    if 200 <= status_code < 300:
+        return True, data, None, False
+
+    return (
+        False,
+        data,
+        classify_github_error(status_code, rate_limit_remaining=rate_limit_remaining),
+        False,
+    )
 
 
 class GitHubClient:
@@ -106,6 +176,7 @@ class GitHubClient:
             integration_id=integration_id,
             json_body=payload,
             headers=headers,
+            oauth_token_endpoint=True,
         )
 
     def get_authenticated_user(
@@ -141,6 +212,7 @@ class GitHubClient:
         integration_id: UUID | None,
         headers: dict[str, str],
         json_body: dict[str, Any] | None = None,
+        oauth_token_endpoint: bool = False,
     ) -> ProviderHttpResult:
         started = time.perf_counter()
         status_code: int | None = None
@@ -148,7 +220,9 @@ class GitHubClient:
         error_code: str | None = None
         rate_limit_remaining: int | None = None
         response_headers: dict[str, str] | None = None
+        malformed_body = False
         timed_out = False
+        ok = False
 
         try:
             with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
@@ -158,16 +232,27 @@ class GitHubClient:
             remaining = response_headers.get("x-ratelimit-remaining")
             if remaining is not None and remaining.isdigit():
                 rate_limit_remaining = int(remaining)
+
+            parse_failed = False
+            parsed: dict[str, Any] | list[Any] | None = None
             try:
-                parsed = response.json()
-                data = parsed if isinstance(parsed, dict) else {"value": parsed}
+                parsed_raw = response.json()
+                if isinstance(parsed_raw, (dict, list)):
+                    parsed = parsed_raw
+                else:
+                    parsed = {"value": parsed_raw}
             except ValueError:
-                data = None
-            if response.is_success:
-                ok = True
-            else:
-                ok = False
-                error_code = classify_github_error(status_code)
+                parse_failed = True
+
+            ok, data, error_code, malformed_body = normalize_json_response(
+                status_code=status_code,
+                raw_text=None,
+                parsed=parsed,
+                parse_failed=parse_failed,
+                rate_limit_remaining=rate_limit_remaining,
+                expect_json=True,
+                oauth_token_endpoint=oauth_token_endpoint,
+            )
         except httpx.TimeoutException:
             timed_out = True
             ok = False
@@ -192,6 +277,8 @@ class GitHubClient:
                 latency_ms=latency_ms,
                 error_message=error_code,
                 rate_limit_remaining=rate_limit_remaining,
+                is_simulated=False,
+                scenario=None,
             )
             session.commit()
         except Exception:  # noqa: BLE001
@@ -206,4 +293,5 @@ class GitHubClient:
             error_code=error_code,
             rate_limit_remaining=rate_limit_remaining,
             headers=response_headers,
+            malformed_body=malformed_body,
         )

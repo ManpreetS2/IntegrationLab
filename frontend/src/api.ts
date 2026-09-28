@@ -1,6 +1,10 @@
 /** Thin HTTP helpers for talking to the FastAPI backend. */
 
 import type {
+  FailureLabRun,
+  FailureLabRunListItem,
+  FailureScenarioId,
+  FailureScenarioInfo,
   GitHubCheckResult,
   GitHubConnection,
   HealthResponse,
@@ -68,14 +72,49 @@ export function checkGitHubConnection(integrationId: string): Promise<GitHubChec
 export function listProviderRequests(params?: {
   provider?: string
   integration_id?: string
+  is_simulated?: boolean
+  scenario?: string
   limit?: number
 }): Promise<ProviderRequestLog[]> {
   const search = new URLSearchParams()
   if (params?.provider) search.set('provider', params.provider)
   if (params?.integration_id) search.set('integration_id', params.integration_id)
+  if (params?.is_simulated !== undefined) search.set('is_simulated', String(params.is_simulated))
+  if (params?.scenario) search.set('scenario', params.scenario)
   if (params?.limit) search.set('limit', String(params.limit))
   const query = search.toString()
   return request<ProviderRequestLog[]>(`/api/provider-requests${query ? `?${query}` : ''}`)
+}
+
+export function listFailureScenarios(): Promise<FailureScenarioInfo[]> {
+  return request<FailureScenarioInfo[]>('/api/failure-lab/scenarios')
+}
+
+export function runFailureScenario(payload: {
+  integration_id: string
+  scenario: FailureScenarioId
+}): Promise<FailureLabRun> {
+  return request<FailureLabRun>('/api/failure-lab/run', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function listFailureRuns(params?: {
+  integration_id?: string
+  scenario?: FailureScenarioId
+  limit?: number
+}): Promise<FailureLabRunListItem[]> {
+  const search = new URLSearchParams()
+  if (params?.integration_id) search.set('integration_id', params.integration_id)
+  if (params?.scenario) search.set('scenario', params.scenario)
+  if (params?.limit) search.set('limit', String(params.limit))
+  const query = search.toString()
+  return request<FailureLabRunListItem[]>(`/api/failure-lab/runs${query ? `?${query}` : ''}`)
+}
+
+export function getFailureRun(runId: string): Promise<FailureLabRun> {
+  return request<FailureLabRun>(`/api/failure-lab/runs/${runId}`)
 }
 
 export { API_URL }

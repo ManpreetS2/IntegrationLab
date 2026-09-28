@@ -98,7 +98,7 @@ def clean_db(test_engine, TestingSessionLocal) -> Generator[None, None, None]:
     with test_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE provider_request_logs, github_profiles, "
+                "TRUNCATE TABLE failure_lab_runs, provider_request_logs, github_profiles, "
                 "oauth_credentials, oauth_sessions, integrations "
                 "RESTART IDENTITY CASCADE"
             )
