@@ -35,6 +35,8 @@ os.environ.setdefault(
     "http://localhost:8000/api/oauth/github/callback",
 )
 os.environ.setdefault("FRONTEND_URL", "http://localhost:5173")
+# Obviously fake webhook secret; tests sign payloads with it locally.
+os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_example")
 
 
 def assert_safe_test_database(url: str) -> str:
@@ -98,7 +100,8 @@ def clean_db(test_engine, TestingSessionLocal) -> Generator[None, None, None]:
     with test_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE failure_lab_runs, provider_request_logs, github_profiles, "
+                "TRUNCATE TABLE webhook_effects, webhook_processing_attempts, webhook_events, "
+                "failure_lab_runs, provider_request_logs, github_profiles, "
                 "oauth_credentials, oauth_sessions, integrations "
                 "RESTART IDENTITY CASCADE"
             )
@@ -137,6 +140,20 @@ def client(TestingSessionLocal) -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def stripe_integration_id(TestingSessionLocal):
+    """Id of the seeded Stripe integration."""
+    from app.db.models import IntegrationORM
+
+    session = TestingSessionLocal()
+    try:
+        integration = session.query(IntegrationORM).filter_by(provider="stripe").first()
+        assert integration is not None
+        return integration.id
+    finally:
+        session.close()
 
 
 @pytest.fixture

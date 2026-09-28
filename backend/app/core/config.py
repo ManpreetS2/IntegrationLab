@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     token_encryption_key: str | None = None
 
+    # Optional Stripe webhook signing secret — app boots without it; the webhook
+    # endpoint returns 503 until it is configured.
+    stripe_webhook_secret: str | None = None
+
     @field_validator("database_url")
     @classmethod
     def require_postgres_url(cls, value: str) -> str:
