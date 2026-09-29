@@ -1,7 +1,8 @@
 # Database Notes
 
 PostgreSQL stores integrations, OAuth artifacts, provider request logs, Failure
-Lab runs, and Stripe webhook events with their processing history.
+Lab runs, Stripe webhook events with their processing history, and persisted
+diagnostic runs with their check results.
 
 ## ER overview
 
@@ -13,9 +14,11 @@ integrations
   ├── github_profiles
   ├── provider_request_logs   (outbound: real + simulated)
   ├── failure_lab_runs
-  └── webhook_events          (inbound)
-        ├── webhook_processing_attempts
-        └── webhook_effects
+  ├── webhook_events          (inbound)
+  │     ├── webhook_processing_attempts
+  │     └── webhook_effects
+  └── diagnostic_runs         (operator-triggered)
+        └── diagnostic_checks
 ```
 
 ```mermaid
@@ -28,6 +31,33 @@ erDiagram
   INTEGRATIONS ||--o{ WEBHOOK_EVENTS : receives
   WEBHOOK_EVENTS ||--o{ WEBHOOK_PROCESSING_ATTEMPTS : "attempted by"
   WEBHOOK_EVENTS ||--o{ WEBHOOK_EFFECTS : produces
+  INTEGRATIONS ||--o{ DIAGNOSTIC_RUNS : diagnosed
+  DIAGNOSTIC_RUNS ||--|{ DIAGNOSTIC_CHECKS : contains
+
+  DIAGNOSTIC_RUNS {
+    uuid id PK
+    uuid integration_id FK
+    varchar provider
+    varchar trigger "manual"
+    timestamptz started_at
+    timestamptz completed_at "null while running"
+    varchar overall_status "running | pass | warning | fail | unknown"
+    text summary
+  }
+
+  DIAGNOSTIC_CHECKS {
+    uuid id PK
+    uuid diagnostic_run_id FK
+    int position
+    varchar check_code "unique with diagnostic_run_id"
+    varchar title
+    varchar status "pass | warning | fail | unknown"
+    boolean required
+    text evidence
+    text recommendation
+    int latency_ms
+    timestamptz observed_at
+  }
 
   PROVIDER_REQUEST_LOGS {
     uuid id PK
@@ -151,6 +181,55 @@ redelivery, reprocessing, crashes, or manual retries. The effect insert and the
 
 All child tables use `ON DELETE CASCADE` from their parent.
 
+## Diagnostic tables
+
+### Run/check relationship
+
+A `diagnostic_runs` row is one operator click on *Run diagnostics*. It owns an
+ordered set of `diagnostic_checks` rows, one per check, ordered by `position`.
+`uq_diagnostic_checks_run_check_code` means a run records each check at most
+once. The run's `overall_status` and `summary` are derived from its checks
+when the run completes:
+
+- a failed required check makes the run `fail`;
+- otherwise any warning makes it `warning`;
+- otherwise any unknown makes it `unknown`;
+- otherwise it is `pass`.
+
+The run is inserted and committed as `running` **before** any check executes.
+That row doubles as a lock: another run for the same integration returns 409
+until the first completes or is older than 120 seconds. Deleting an integration
+cascades to its runs, and deleting a run cascades to its checks.
+
+Indexes serve exactly the queries the app makes:
+
+- `(integration_id, started_at)`: per-integration history and "latest run";
+- `started_at`: the window counts and the failures feed;
+- `diagnostic_run_id`: loading a run's checks.
+
+### Why results are persisted
+
+- **History:** "it passed yesterday, it fails today" is itself evidence.
+- **Auditability:** the exact evidence an operator acted on can be reopened
+  later, instead of re-running and getting a different answer.
+- **Dashboard input:** the latest run appears on each health card, and failed
+  runs appear in the failures feed, without calling any provider again.
+
+### Why provider secrets are NOT persisted
+
+Check rows hold only human-readable evidence and recommendations. For example,
+"An encrypted OAuth credential is stored (value not displayed)" or "Missing
+configuration: GITHUB_CLIENT_SECRET". They never hold:
+
+- tokens or ciphertext;
+- `STRIPE_WEBHOOK_SECRET`, `GITHUB_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`, or
+  `DATABASE_URL`;
+- signature headers, `Authorization` headers, or raw provider bodies.
+
+Diagnostic history is read by the UI and kept indefinitely, so anything stored
+there would effectively be published. Tests scan both the API responses and the
+stored rows for these values.
+
 ## Why simulated vs real logs must be distinguishable
 
 Failure Lab writes provider request logs so the dashboard can show latency and
@@ -170,6 +249,7 @@ UI badges:
 | `002_github_oauth_and_logs` | OAuth + profiles + request logs |
 | `003_failure_lab` | `is_simulated`/`scenario` + `failure_lab_runs` |
 | `004_stripe_webhooks` | `webhook_events`, `webhook_processing_attempts`, `webhook_effects` |
+| `005_diagnostics` | `diagnostic_runs`, `diagnostic_checks` |
 
 ```bash
 alembic upgrade head
@@ -177,7 +257,8 @@ alembic downgrade -1
 alembic upgrade head
 ```
 
-Do not edit 001–003 after merge.
+Do not edit 001–004 after merge. No data retention policy is implemented yet:
+request logs, webhook history, and diagnostic runs grow until pruned manually.
 
 ## Encryption
 
@@ -188,4 +269,5 @@ the database.
 ## Test database
 
 Pytest uses `integrationlab_test` (the name must end with `_test`). Between
-tests it truncates all application tables, including the webhook tables.
+tests it truncates all application tables, including the webhook and diagnostic
+tables.

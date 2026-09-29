@@ -1,7 +1,9 @@
-# IntegrationLab Architecture — GitHub OAuth, Failure Lab, Stripe Webhooks
+# IntegrationLab Architecture — OAuth, Failure Lab, Webhooks, Reliability, Diagnostics
 
-IntegrationLab has three flows: outbound calls to providers (real GitHub and
-simulated Failure Lab), and inbound provider events (Stripe webhooks).
+IntegrationLab has three evidence-producing flows: real outbound calls to
+GitHub, simulated outbound calls from Failure Lab, and inbound Stripe webhooks.
+Two operator flows sit on top of that evidence: the reliability dashboard, which
+only reads it, and guided diagnostics, which actively collects more.
 
 ## High-level
 
@@ -99,12 +101,53 @@ We return 2xx once the event is durably stored, even if processing will later
 fail; internal failures are handled by our own retry engine. See
 [stripe-webhooks.md](stripe-webhooks.md).
 
+The public webhook route is `async` so it can read the exact raw body. The
+blocking receiver then runs in the threadpool, and it opens its **own**
+SQLAlchemy `Session` inside that worker thread and closes it there. A Session
+is never shared between the event-loop thread and a threadpool thread.
+
+## Reliability read path (passive)
+
+```text
+PostgreSQL evidence
+  (provider_request_logs is_simulated=false, webhook_events + attempts,
+   failure_lab_runs, diagnostic_runs)
+  → reliability repository (grouped aggregate queries)
+  → health evaluator (pure, deterministic rules)
+  → GET /api/reliability/{overview, integrations/{id}, failures, request-metrics}
+  → Overview / Requests / Failures pages
+```
+
+**Loading the dashboard does NOT call GitHub or Stripe.** Every number and
+health state comes from rows already in PostgreSQL. Refreshing the page,
+including the optional 60-second auto-refresh, only runs SQL. If PostgreSQL is
+unreachable, the API returns a single 503 "Database unavailable" and no
+integration is marked failed. See [reliability.md](reliability.md).
+
+## Diagnostics path (active)
+
+```text
+UI (Diagnostics page)
+  → POST /api/diagnostics/{integration_id}/run
+  → DiagnosticsService (run row committed as "running"; 409 if one is in flight)
+  → provider-specific checks
+       GitHub: config → credential → decrypt → optional real GET /user probe
+               (only when a credential decrypts; logged as a real request)
+       Stripe: config + stored webhook evidence (no outbound calls)
+  → diagnostic_checks rows + overall status + summary (persisted)
+  → run JSON → UI (and history via GET /api/diagnostics/{id}/runs)
+```
+
+**Active diagnostics DO call providers**, but only the GitHub probe, and only
+when an operator explicitly asks. Checks never change `integrations.status`,
+credentials, or webhook events. See [diagnostics.md](diagnostics.md).
+
 ## Layers
 
 | Layer | Role |
 |-------|------|
-| Routes (`app/api`) | HTTP (public webhook router + operator router) |
-| Services | OAuth, GitHub client, Failure Lab, diagnosis, webhook receiver/processor/handlers/retry policy |
+| Routes (`app/api`) | HTTP (public webhook router, operator routers, reliability, diagnostics) |
+| Services | OAuth, GitHub client, Failure Lab, diagnosis, webhook receiver/processor/handlers/retry policy, reliability rules/evaluator, diagnostic checks |
 | Repositories | DB access (incl. idempotent inserts, row locking) |
 | ORM (`app/db/models`) | Tables |
 | Pydantic (`app/models`) | API contracts |
@@ -124,12 +167,15 @@ state. Valid state + `access_denied` marks the state used and redirects with
 
 - Redis / Celery / queues / AWS
 - Background daemon (the worker runs as a single CLI tick)
+- Continuous background monitoring or alerts (health is computed on request)
 - Real payment mutations or Stripe API writes
 - AI diagnosis
 - Application user login
 
 ## Related docs
 
+- [reliability.md](reliability.md)
+- [diagnostics.md](diagnostics.md)
 - [stripe-webhooks.md](stripe-webhooks.md)
 - [failure-lab.md](failure-lab.md)
 - [github-oauth.md](github-oauth.md)
