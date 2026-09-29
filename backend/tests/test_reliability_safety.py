@@ -4,13 +4,20 @@ from collections.abc import Generator
 
 import pytest
 import respx
-from sqlalchemy import create_engine
+from httpx import Response
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.db.models.diagnostics import DiagnosticCheckORM, DiagnosticRunORM
 from app.main import app
-from tests.reliability_helpers import add_log, connect_github_directly, github_integration
+from tests.reliability_helpers import (
+    FAKE_TOKEN,
+    add_log,
+    connect_github_directly,
+    github_integration,
+)
 from tests.stripe_helpers import make_event, post_event
 from tests.test_github_check import _connect_github
 
@@ -113,6 +120,52 @@ def test_reliability_responses_never_expose_secrets(
     for response in responses:
         assert response.status_code == 200
         text = response.text
+        for fragment in FORBIDDEN_FRAGMENTS:
+            assert fragment not in text, fragment
+        for secret in secrets:
+            assert secret and secret not in text
+        assert "stripe-signature" not in text.lower()
+
+
+@respx.mock
+def test_diagnostics_never_store_or_return_secrets(
+    client, db_session, stripe_integration_id
+) -> None:
+    gh = github_integration(db_session)
+    ciphertext = connect_github_directly(db_session, gh.id)
+    respx.get("https://api.github.com/user").mock(
+        return_value=Response(401, json={"message": "Bad credentials", "marker": "raw-provider-body"})
+    )
+    post_event(client, stripe_integration_id, make_event(event_id="evt_diag_leak"))
+
+    responses = []
+    for integration_id in (gh.id, stripe_integration_id):
+        run = client.post(f"/api/diagnostics/{integration_id}/run")
+        assert run.status_code == 200
+        responses += [
+            run,
+            client.get(f"/api/diagnostics/runs/{run.json()['id']}"),
+            client.get(f"/api/diagnostics/{integration_id}/runs"),
+        ]
+
+    stored_rows = [
+        {column.name: getattr(row, column.name) for column in row.__table__.columns}
+        for model in (DiagnosticRunORM, DiagnosticCheckORM)
+        for row in db_session.scalars(select(model))
+    ]
+    assert len(stored_rows) > 2
+
+    settings = get_settings()
+    secrets = [
+        FAKE_TOKEN,
+        ciphertext,
+        settings.github_client_secret,
+        settings.token_encryption_key,
+        settings.stripe_webhook_secret,
+        settings.database_url,
+        "raw-provider-body",
+    ]
+    for text in [r.text for r in responses] + [str(stored_rows)]:
         for fragment in FORBIDDEN_FRAGMENTS:
             assert fragment not in text, fragment
         for secret in secrets:
