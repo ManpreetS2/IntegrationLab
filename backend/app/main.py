@@ -6,12 +6,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    diagnostics,
     failure_lab,
     github,
     health,
     integrations,
     oauth,
     provider_requests,
+    reliability,
     stripe_webhooks,
 )
 from app.core.config import get_settings
@@ -25,8 +27,11 @@ settings = get_settings()
 
 app = FastAPI(
     title="IntegrationLab",
-    description="Partner-integration reliability console (GitHub OAuth, Failure Lab, Stripe webhooks)",
-    version="0.5.0",
+    description=(
+        "Partner integration reliability console (GitHub OAuth, Failure Lab, Stripe webhooks, "
+        "reliability dashboard, guided diagnostics)"
+    ),
+    version="0.6.0",
 )
 
 app.add_middleware(
@@ -45,3 +50,5 @@ app.include_router(provider_requests.router)
 app.include_router(failure_lab.router)
 app.include_router(stripe_webhooks.public_router)
 app.include_router(stripe_webhooks.router)
+app.include_router(reliability.router)
+app.include_router(diagnostics.router)
