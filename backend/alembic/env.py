@@ -16,7 +16,8 @@ from app.db import models  # noqa: F401  — register ORM models on Base.metadat
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep application loggers enabled when migrations run in-process (tests).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

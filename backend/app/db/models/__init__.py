@@ -3,6 +3,7 @@
 Import models here so Alembic and Base.metadata see them.
 """
 
+from app.db.models.diagnostics import DiagnosticCheckORM, DiagnosticRunORM
 from app.db.models.failure_lab import FailureLabRunORM
 from app.db.models.integration import IntegrationORM
 from app.db.models.oauth import (
@@ -27,4 +28,6 @@ __all__ = [
     "WebhookEventORM",
     "WebhookProcessingAttemptORM",
     "WebhookEffectORM",
+    "DiagnosticRunORM",
+    "DiagnosticCheckORM",
 ]
