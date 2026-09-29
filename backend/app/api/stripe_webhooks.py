@@ -7,13 +7,14 @@ Inbound webhooks are stored in webhook_events, not provider_request_logs
 (which records outbound calls we make to providers).
 """
 
+from collections.abc import Callable
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.models.webhook import (
     ProcessDueResponse,
     WebhookEventDetail,
@@ -30,23 +31,35 @@ public_router = APIRouter(prefix="/webhooks/stripe", tags=["stripe-webhooks"])
 router = APIRouter(prefix="/api/webhooks/stripe", tags=["stripe-webhooks"])
 
 
-@public_router.post("/{integration_id}", response_model=WebhookReceiptResponse)
-async def receive_stripe_webhook(
+# Sessions for the public webhook route are created inside the worker thread,
+# never passed across the async/threadpool boundary.
+webhook_session_factory: Callable[[], Session] = SessionLocal
+
+
+def _receive_with_own_session(
     integration_id: UUID,
-    request: Request,
-    db: Session = Depends(get_db),
+    payload: bytes,
+    signature_header: str | None,
 ) -> WebhookReceiptResponse:
+    session = webhook_session_factory()
+    try:
+        return stripe_webhook_receiver.receive(
+            session,
+            integration_id=integration_id,
+            payload=payload,
+            signature_header=signature_header,
+        )
+    finally:
+        session.close()
+
+
+@public_router.post("/{integration_id}", response_model=WebhookReceiptResponse)
+async def receive_stripe_webhook(integration_id: UUID, request: Request) -> WebhookReceiptResponse:
     """Verify, dedupe, and durably store a Stripe event; processing happens later."""
     # Raw bytes, never a parsed model — signature verification needs the exact body.
     payload = await request.body()
     signature = request.headers.get("stripe-signature")
-    return await run_in_threadpool(
-        stripe_webhook_receiver.receive,
-        db,
-        integration_id=integration_id,
-        payload=payload,
-        signature_header=signature,
-    )
+    return await run_in_threadpool(_receive_with_own_session, integration_id, payload, signature)
 
 
 @router.get("/summary", response_model=WebhookSummaryResponse)
