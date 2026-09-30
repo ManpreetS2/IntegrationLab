@@ -79,6 +79,7 @@ into GitHub Secrets, tfvars, or task-definition plaintext.
 
 ```bash
 export APP_SECRET_ARN="$(terraform -chdir=infra/terraform output -raw app_secret_arn)"
+export OPERATOR_API_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export GITHUB_CLIENT_ID=...
 export GITHUB_CLIENT_SECRET=...
 export TOKEN_ENCRYPTION_KEY=...
@@ -86,8 +87,9 @@ export STRIPE_WEBHOOK_SECRET=...
 ./scripts/aws/put-app-secrets.sh
 ```
 
-The script never echoes secret values. Terraform ignores later changes to the
-secret string so `apply` will not wipe manual values.
+The script never echoes secret values. `OPERATOR_API_KEY` is required in
+production and must be at least 24 characters. Terraform ignores later changes
+to the secret string so `apply` will not wipe manual values.
 
 ## GitHub OIDC (immutable subjects)
 
@@ -166,8 +168,12 @@ Scale-to-zero for cost control is a **separate** manual operation
 BASE="$(terraform -chdir=infra/terraform output -raw cloudfront_url)"
 curl -fsS "$BASE/health"
 curl -fsS "$BASE/ready"
-curl -fsS "$BASE/api/reliability/system"
+curl -fsS "$BASE/auth/operator"
 curl -fsS "$BASE/" | head
+
+# Operator APIs require the runtime key:
+curl -fsS -H "Authorization: Bearer $OPERATOR_API_KEY" \
+  "$BASE/api/reliability/system"
 ```
 
 ### Stripe signature through CloudFront (acceptance)
@@ -208,6 +214,21 @@ terraform destroy
 
 With `db_skip_final_snapshot = true` (portfolio default), **RDS data is lost**.
 
+## Operator API authentication
+
+All operator `/api/*` routes are protected by a single high-entropy bearer key
+in production, except the GitHub OAuth browser handoff routes that must remain
+public. The React console asks for the key at runtime and stores it only in
+`sessionStorage`; it is never part of the Vite build.
+
+The deploy workflow intentionally does **not** retrieve this key from Secrets
+Manager. Its post-deploy smoke test proves the public edge returns 401 for an
+unauthenticated operator API request. Positive authenticated coverage is
+provided by the full local Compose smoke job.
+
+This is a single-operator portfolio gate, not user identity/RBAC. See
+[threat-model.md](threat-model.md).
+
 ## Trusted proxies / redirects
 
 The backend enables Uvicorn `--proxy-headers` but keeps the default
@@ -241,3 +262,11 @@ python -m app.scripts.process_webhooks
 An EventBridge → ECS RunTask worker is intentionally not enabled by default
 because a 1-minute schedule would misrepresent the designed 1s/2s/4s retry
 timing.
+
+
+## Origin-TLS note
+
+The default portfolio path remains CloudFront HTTPS → ALB HTTP. This is
+explicitly a portfolio tradeoff, not the recommended shape for real sensitive
+operator traffic. Before real use, add a custom domain + ACM and use HTTPS on
+the ALB origin so the Authorization header is encrypted end-to-end.
