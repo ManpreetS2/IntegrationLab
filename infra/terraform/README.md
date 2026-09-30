@@ -40,6 +40,25 @@ A stricter production design would place ECS in private subnets behind NAT or VP
 
 ALB target group uses `GET /health` (liveness). `/ready` still checks the database and can return 503 without removing every task from the load balancer during a brief DB blip.
 
+## GitHub OIDC trust (immutable)
+
+Default trusted `sub` (environment context only):
+
+```text
+repo:ManpreetS2@111776138/IntegrationLab@1391676369:environment:production
+```
+
+Verify before apply/deploy:
+
+```bash
+gh api repos/ManpreetS2/IntegrationLab/actions/oidc/customization/sub
+```
+
+Configure the GitHub Environment `production` to allow deployment branches
+**main** only. The deploy workflow also refuses non-`main` refs.
+
+`thumbprint_list` is omitted — AWS trusts GitHub via its managed CA bundle.
+
 ## Validate (no AWS spend)
 
 ```bash

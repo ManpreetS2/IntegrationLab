@@ -89,10 +89,36 @@ export STRIPE_WEBHOOK_SECRET=...
 The script never echoes secret values. Terraform ignores later changes to the
 secret string so `apply` will not wipe manual values.
 
-## GitHub OIDC
+## GitHub OIDC (immutable subjects)
+
+IntegrationLab was created after **2026-07-15**, so GitHub's default OIDC `sub`
+uses the **immutable** format with owner ID + repository ID.
+
+Inspect the live prefix (do this before first AWS deploy):
+
+```bash
+gh api repos/ManpreetS2/IntegrationLab/actions/oidc/customization/sub
+# → use_immutable_subject: true
+# → sub_claim_prefix: repo:ManpreetS2@111776138/IntegrationLab@1391676369
+```
+
+The deploy workflow sets `environment: production`, so the OIDC context is the
+**environment** subject (not a branch-ref subject):
+
+```text
+repo:ManpreetS2@111776138/IntegrationLab@1391676369:environment:production
+```
+
+That exact string is the only default entry in `github_oidc_subjects`. Do **not**
+add legacy name-only subjects, branch-ref subjects, or wildcards merely to make
+`AssumeRoleWithWebIdentity` succeed.
+
+### Configure the GitHub Environment
 
 1. Confirm Terraform created `github_deploy_role_arn`.
-2. In GitHub → Settings → Environments → **production**, add variables:
+2. In GitHub → Settings → Environments → **production**:
+   - **Deployment branches:** restrict to `main` only
+   - Add variables:
 
 | Variable | Source |
 |----------|--------|
@@ -109,25 +135,30 @@ secret string so `apply` will not wipe manual values.
 
 3. **Do not** store `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
 
-4. If `AssumeRoleWithWebIdentity` fails, inspect the workflow's OIDC `sub`
-   claim and align `github_oidc_subjects` in Terraform. Keep trust narrow to
-   `ManpreetS2/IntegrationLab`.
+4. The deploy workflow also refuses to run unless `github.ref == refs/heads/main`.
+
+5. To debug a failed assume-role, temporarily log the token claims from a dry-run
+   workflow (never widen IAM trust with `repo:*` wildcards).
 
 ## First deployment
 
 1. Populate app secrets (above).
-2. Run **Actions → Deploy → Run workflow** (`workflow_dispatch`).
+2. On branch **main**, run **Actions → Deploy → Run workflow** (`workflow_dispatch`).
 3. Sequence executed by `.github/workflows/deploy.yml`:
-   1. OIDC → AWS
-   2. Build/push backend image tagged with `${GITHUB_SHA}`
-   3. Register new ECS task definition revision
-   4. Run one-off ECS task: `alembic upgrade head`
-   5. Abort if migration exit code ≠ 0
-   6. Update ECS service, wait for stability, set desired count
-   7. `npm ci && npm run build` with `VITE_API_URL=""`
-   8. Sync `frontend/dist` to S3
-   9. CloudFront invalidation
-   10. Smoke tests through CloudFront
+   1. Guard: must be `refs/heads/main`
+   2. OIDC → AWS (immutable `environment:production` subject)
+   3. Build/push backend image tagged with `${GITHUB_SHA}`
+   4. Register new ECS task definition revision
+   5. Run one-off ECS task: `alembic upgrade head`
+   6. Abort if migration exit code ≠ 0
+   7. Update ECS service to desired count **1**, wait for stability
+   8. `npm ci && npm run build` with `VITE_API_URL=""`
+   9. Sync `frontend/dist` to S3
+   10. CloudFront invalidation
+   11. Smoke tests through CloudFront
+
+Scale-to-zero for cost control is a **separate** manual operation
+(`aws ecs update-service --desired-count 0`), not a successful "deploy".
 
 ## Smoke test (manual)
 
@@ -176,6 +207,27 @@ terraform destroy
 ```
 
 With `db_skip_final_snapshot = true` (portfolio default), **RDS data is lost**.
+
+## Trusted proxies / redirects
+
+The backend enables Uvicorn `--proxy-headers` but keeps the default
+`--forwarded-allow-ips=127.0.0.1` (it does **not** trust arbitrary
+`X-Forwarded-*` from the internet or blanket `*`).
+
+OAuth redirects and frontend links use the explicitly configured
+`FRONTEND_URL` and `GITHUB_OAUTH_REDIRECT_URI` environment variables set from
+the CloudFront URL. Application behavior does not depend on reconstructing
+public URLs from ALB/CloudFront forwarded headers.
+
+## ECS task definition ownership
+
+- Terraform owns the **baseline** task-definition template (env, secrets, logs).
+- The ECS **service** ignores `task_definition` / `desired_count` drift so CD can
+  point the service at SHA-tagged revisions.
+- After changing env/secrets/logging in Terraform, re-run the deploy workflow so
+  CD registers a new SHA revision from the latest family definition.
+- Rolling deploy: `minimumHealthyPercent=100`, `maximumPercent=200`, with the
+  ECS deployment circuit breaker + rollback enabled.
 
 ## Known operational limitation
 

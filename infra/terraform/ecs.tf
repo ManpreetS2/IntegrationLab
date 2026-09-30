@@ -23,9 +23,10 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
 }
 
 locals {
-  # Placeholder image used only so Terraform can register an initial task
-  # definition before the first real SHA is pushed. Deploy workflow replaces
-  # this with the Git SHA tag from ECR.
+  # Baseline image for the Terraform-managed task-definition revision.
+  # CD replaces the image with an ECR SHA tag when registering deploy revisions.
+  # Re-run the deploy workflow after Terraform changes env/secrets/logging so
+  # the service picks up a CD revision built from the latest family template.
   placeholder_image = "public.ecr.aws/docker/library/python:3.13-slim"
 }
 
@@ -89,10 +90,12 @@ resource "aws_ecs_task_definition" "api" {
     cpu_architecture        = "X86_64"
   }
 
-  # Deploy workflow registers new revisions with real image SHAs.
-  lifecycle {
-    ignore_changes = [container_definitions]
-  }
+  # No ignore_changes on container_definitions: Terraform continues to own the
+  # baseline env/secrets/logging template. The ECS *service* ignores
+  # task_definition drift so CD can point the service at SHA-tagged revisions
+  # without Terraform immediately reverting them. After changing this template,
+  # re-run the deploy workflow so CD registers a new SHA revision from the
+  # latest family definition.
 
   tags = {
     Name = local.container_name
@@ -118,10 +121,16 @@ resource "aws_ecs_service" "api" {
     container_port   = var.container_port
   }
 
-  deployment_minimum_healthy_percent = 0
+  # Keep the existing task healthy until the replacement passes ALB checks.
+  deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
-  # First deploy sets desired_count and a real task definition revision.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  # CD owns the running task-definition revision and desired count after first deploy.
   lifecycle {
     ignore_changes = [desired_count, task_definition]
   }

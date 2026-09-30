@@ -172,8 +172,14 @@ Console: `http://localhost:5173/#/overview`
 
 ```bash
 docker compose -f docker-compose.full.yml up --build
+# Ordering: postgres healthy → alembic upgrade head (one-shot) → backend → frontend
 # UI http://localhost:8080  API http://localhost:8000
 ```
+
+The production backend image does **not** migrate on every boot. Compose runs a
+one-shot `migrate` service (`alembic upgrade head`) that must complete
+successfully before the API container starts — the same pattern as the ECS
+one-off migration task.
 
 ## Screenshots
 

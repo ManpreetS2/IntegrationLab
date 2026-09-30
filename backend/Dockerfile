@@ -46,4 +46,9 @@ USER app
 EXPOSE 8000
 
 # ALB/ECS HTTP health checks hit GET /health — no curl required in the image.
+#
+# --proxy-headers is enabled, but Uvicorn's default --forwarded-allow-ips is
+# 127.0.0.1 only. We intentionally do NOT set forwarded-allow-ips=* (unsafe).
+# Redirects and OAuth callbacks use configured FRONTEND_URL and
+# GITHUB_OAUTH_REDIRECT_URI, not X-Forwarded-* derived host/scheme.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

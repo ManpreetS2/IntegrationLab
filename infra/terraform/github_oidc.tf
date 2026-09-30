@@ -1,14 +1,43 @@
 # GitHub Actions → AWS via OIDC (no long-lived access keys).
 #
-# Trust is narrowed to ManpreetS2/IntegrationLab subjects listed in
-# var.github_oidc_subjects. Inspect the actual `sub` claim from a workflow
-# run if assume-role fails — GitHub may include repository/account IDs in
-# newer subject formats.
+# IntegrationLab was created after 2026-07-15, so GitHub issues immutable `sub`
+# claims that embed owner + repository IDs:
+#   repo:ManpreetS2@111776138/IntegrationLab@1391676369:environment:production
+#
+# The deploy workflow uses `environment: production`, so trust is scoped to that
+# environment subject only — not a legacy branch-ref subject.
+#
+# Verify the live prefix before first apply/deploy:
+#   gh api repos/ManpreetS2/IntegrationLab/actions/oidc/customization/sub
+# Do not widen the trust policy with wildcards merely to make AssumeRole work.
+
+locals {
+  github_oidc_sub_prefix = "repo:${split("/", var.github_repository)[0]}@${var.github_owner_id}/${split("/", var.github_repository)[1]}@${var.github_repository_id}"
+  github_oidc_expected_environment_sub = (
+    "${local.github_oidc_sub_prefix}:environment:${var.github_deploy_environment}"
+  )
+}
+
+check "github_oidc_subjects_match_immutable_environment" {
+  assert {
+    condition = (
+      length(var.github_oidc_subjects) == 1 &&
+      var.github_oidc_subjects[0] == local.github_oidc_expected_environment_sub
+    )
+    error_message = <<-EOT
+      github_oidc_subjects must be exactly the immutable production-environment subject:
+        ${local.github_oidc_expected_environment_sub}
+      Inspect with:
+        gh api repos/${var.github_repository}/actions/oidc/customization/sub
+    EOT
+  }
+}
 
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["ffffffffffffffffffffffffffffffffffffffff"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+  # thumbprint_list intentionally omitted: AWS trusts GitHub via its managed CA
+  # bundle. Do not store fake/placeholder thumbprints.
 
   tags = {
     Name = "${local.name_prefix}-github-oidc"

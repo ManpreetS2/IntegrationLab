@@ -38,17 +38,39 @@ def test_build_database_url_from_secret_json() -> None:
 
 
 def test_build_database_url_url_encodes_special_password_chars() -> None:
+    password = "a b+c/d?#"
     url = build_database_url(
         database_url=None,
         db_host="db",
         db_port=5432,
         db_name="app",
         db_user="fallback_user",
-        db_secret_json=json.dumps({"username": "u", "password": "a b+c/d?#"}),
+        db_secret_json=json.dumps({"username": "u", "password": password}),
     )
-    # quote_plus encodes spaces as '+' and reserves special URL characters.
-    assert "a+b%2Bc%2Fd%3F%23" in url
+    # Spaces must be %20 (not '+') so SQLAlchemy/libpq round-trip correctly.
+    assert "a%20b%2Bc%2Fd%3F%23" in url
+    assert "a+b" not in url.split("@", 1)[0]
     assert "a b+c" not in url
+
+
+def test_build_database_url_round_trips_special_credentials() -> None:
+    from sqlalchemy.engine.url import make_url
+
+    username = "user name/with:chars"
+    password = "p@ss word+/=?#&"
+    url = build_database_url(
+        database_url=None,
+        db_host="db.example.internal",
+        db_port=5432,
+        db_name="integrationlab",
+        db_user=None,
+        db_secret_json=json.dumps({"username": username, "password": password}),
+    )
+    parsed = make_url(url)
+    assert parsed.username == username
+    assert parsed.password == password
+    assert parsed.host == "db.example.internal"
+    assert parsed.database == "integrationlab"
 
 
 def test_build_database_url_requires_complete_aws_inputs() -> None:

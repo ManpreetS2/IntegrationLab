@@ -161,6 +161,26 @@ jobs:
           fi
           echo "Image contents look clean"
 
+  frontend-container:
+    name: frontend-container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build local frontend packaging image
+        run: |
+          set -euo pipefail
+          docker build -f frontend/Dockerfile -t "integrationlab-frontend:${GITHUB_SHA}" .
+
+      - name: Validate compose migration wiring (config only)
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.full.yml config >/tmp/compose.full.yml
+          grep -q 'condition: service_completed_successfully' /tmp/compose.full.yml
+          grep -q 'alembic' /tmp/compose.full.yml
+          grep -q 'upgrade' /tmp/compose.full.yml
+          echo "docker-compose.full.yml migrate → backend ordering present"
+
   terraform-quality:
     name: terraform-quality
     runs-on: ubuntu-latest

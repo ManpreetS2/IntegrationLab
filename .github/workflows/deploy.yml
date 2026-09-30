@@ -2,17 +2,13 @@ name: Deploy
 
 # Manual only — do not auto-spend AWS money on every push.
 # Enable automatic main deploys later only after infrastructure is intentionally online.
+#
+# Requirements:
+# - Run from branch `main` (enforced below)
+# - GitHub Environment `production` should restrict deployment branches to `main`
+# - OIDC trust is the immutable environment subject only (see infra/terraform)
 on:
   workflow_dispatch:
-    inputs:
-      desired_count:
-        description: "ECS desired task count after deploy"
-        required: true
-        default: "1"
-        type: choice
-        options:
-          - "0"
-          - "1"
 
 permissions:
   contents: read
@@ -32,6 +28,7 @@ env:
   FRONTEND_BUCKET: ${{ vars.FRONTEND_BUCKET }}
   CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
   CLOUDFRONT_URL: ${{ vars.CLOUDFRONT_URL }}
+  ECS_DESIRED_COUNT: "1"
 
 jobs:
   deploy:
@@ -39,6 +36,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Require main branch
+        run: |
+          set -euo pipefail
+          echo "github.ref=${GITHUB_REF}"
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Refusing deploy: run this workflow from refs/heads/main (got ${GITHUB_REF})." >&2
+            echo "Also configure the GitHub Environment 'production' to allow only the main branch." >&2
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -149,7 +156,7 @@ jobs:
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
-          desired-count: ${{ github.event.inputs.desired_count }}
+          desired-count: ${{ env.ECS_DESIRED_COUNT }}
 
       - name: Setup Node for frontend build
         uses: actions/setup-node@v7

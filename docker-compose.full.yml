@@ -3,11 +3,16 @@
 # Usage:
 #   docker compose -f docker-compose.full.yml up --build
 #
+# Ordering:
+#   postgres healthy → migrate (alembic upgrade head) → backend → frontend
+#
 # This does NOT replace the simple local workflow:
 #   docker compose up -d postgres
 #   uvicorn + npm run dev
 #
 # Frontend container is for local packaging only — AWS uses S3/CloudFront.
+# The production backend image does NOT migrate on every boot; migrate is a
+# one-shot Compose service (mirrors the ECS one-off migration task).
 
 services:
   postgres:
@@ -27,7 +32,23 @@ services:
       retries: 10
       start_period: 10s
 
+  migrate:
+    image: integrationlab-backend:compose
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: integrationlab-full-migrate
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@postgres:5432/integrationlab
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
   backend:
+    image: integrationlab-backend:compose
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -47,6 +68,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     healthcheck:

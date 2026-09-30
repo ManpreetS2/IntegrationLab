@@ -32,6 +32,12 @@ GitHub Environment `production`.
 - Builds `backend/Dockerfile` without AWS credentials
 - Scans the image tar for `.env`, terraform state, and credential files
 
+### frontend-container
+
+- Builds `frontend/Dockerfile` (local packaging image; not deployed to ECS)
+- Validates `docker-compose.full.yml` includes migrate →
+  `service_completed_successfully` → backend ordering
+
 ### terraform-quality
 
 - Terraform 1.16.4
@@ -46,14 +52,18 @@ Deploy: `contents: read` + `id-token: write` for OIDC. No `write-all`.
 
 ## CD sequence
 
-1. Assume IAM role via GitHub OIDC (no static access keys)
-2. Build/push ECR image tagged with `${GITHUB_SHA}` (immutable)
-3. Render + register a new ECS task definition revision
-4. Run one-off migration task (`alembic upgrade head`); abort on failure
-5. Deploy service; wait for stability; set desired count
-6. Build frontend (same-origin API); sync to S3
-7. CloudFront invalidation
-8. Smoke tests through CloudFront URL
+1. Refuse unless `github.ref == refs/heads/main`
+2. Assume IAM role via GitHub OIDC using the immutable
+   `…:environment:production` subject (no static access keys)
+3. Build/push ECR image tagged with `${GITHUB_SHA}` (immutable)
+4. Render + register a new ECS task definition revision
+5. Run one-off migration task (`alembic upgrade head`); abort on failure
+6. Deploy service at desired count **1**; wait for stability
+7. Build frontend (same-origin API); sync to S3
+8. CloudFront invalidation
+9. Smoke tests through CloudFront URL
+
+Scale-to-zero is a separate manual ops action, not part of a successful deploy.
 
 ## Recommended branch protection
 
@@ -62,6 +72,7 @@ Require these checks before merge to `main`:
 - `backend-tests`
 - `frontend-quality`
 - `backend-container`
+- `frontend-container`
 - `terraform-quality`
 
 Do not modify repository branch protection from automation unless explicitly

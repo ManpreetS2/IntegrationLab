@@ -9,9 +9,19 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
+
+
+def _encode_userinfo(value: str) -> str:
+    """Percent-encode username/password for a PostgreSQL URL userinfo segment.
+
+    Uses quote(..., safe='') so spaces become %20 (not '+'). quote_plus is
+    form-encoding and is unsafe for URL userinfo round-trips.
+    """
+    return quote(value, safe="")
+
 
 
 class SecretConfigError(ValueError):
@@ -86,8 +96,8 @@ def build_database_url(
             "INTEGRATIONLAB_DB_SECRET must include non-empty username and password"
         )
 
-    user_enc = quote_plus(username)
-    pass_enc = quote_plus(password)
+    user_enc = _encode_userinfo(username)
+    pass_enc = _encode_userinfo(password)
     host = str(db_host).strip()
     port = int(db_port)  # type: ignore[arg-type]
     name = str(db_name).strip()

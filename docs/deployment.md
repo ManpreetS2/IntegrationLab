@@ -2,15 +2,20 @@
 
 ## Happy path
 
+0. Run from `main` only (workflow guard + GitHub Environment branch restriction).
 1. Build/push backend image tagged with the Git commit SHA.
 2. Register a new ECS task definition revision referencing that SHA.
 3. Run a one-off ECS task with command `alembic upgrade head`.
 4. Abort if the migration exit code is non-zero.
-5. Update the ECS service to the new task definition; wait for stability.
+5. Update the ECS service to the new task definition at desired count **1**;
+   wait for stability (min healthy 100% / max 200%, circuit breaker rollback).
 6. Build the frontend with `VITE_API_URL=""` (same-origin).
 7. Sync `frontend/dist` to the private S3 bucket.
 8. Invalidate CloudFront (`/index.html` and `/*`).
 9. Smoke test `/health`, `/ready`, `/api/reliability/system` through CloudFront.
+
+Scale-to-zero for cost control is manual (`aws ecs update-service --desired-count 0`)
+and is not a successful deploy outcome.
 
 Images are immutable SHA tags in ECR. That creates the chain:
 

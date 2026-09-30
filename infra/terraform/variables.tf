@@ -106,12 +106,41 @@ variable "github_repository" {
   default     = "ManpreetS2/IntegrationLab"
 }
 
+variable "github_owner_id" {
+  description = "Immutable GitHub owner/user ID (numeric). Used in OIDC sub."
+  type        = string
+  default     = "111776138"
+}
+
+variable "github_repository_id" {
+  description = "Immutable GitHub repository ID (numeric). Used in OIDC sub."
+  type        = string
+  default     = "1391676369"
+}
+
+variable "github_deploy_environment" {
+  description = "GitHub Environment name used by the deploy workflow (OIDC context)."
+  type        = string
+  default     = "production"
+}
+
 variable "github_oidc_subjects" {
-  description = "Exact OIDC subject claims trusted for deployment. Keep narrow."
+  description = <<-EOT
+    Exact OIDC `sub` claims trusted for deployment. Keep narrow — no wildcards.
+
+    IntegrationLab was created after 2026-07-15, so GitHub's default `sub` uses
+    the immutable format with owner/repo IDs. The deploy job sets
+    `environment: production`, so the trusted subject is the environment claim
+    (not a branch-ref claim).
+
+    Verify before first deploy:
+      gh api repos/ManpreetS2/IntegrationLab/actions/oidc/customization/sub
+    Expected prefix:
+      repo:ManpreetS2@111776138/IntegrationLab@1391676369
+  EOT
   type        = list(string)
   default = [
-    "repo:ManpreetS2/IntegrationLab:environment:production",
-    "repo:ManpreetS2/IntegrationLab:ref:refs/heads/main",
+    "repo:ManpreetS2@111776138/IntegrationLab@1391676369:environment:production",
   ]
 }
 
