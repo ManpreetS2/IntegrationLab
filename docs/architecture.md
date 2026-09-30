@@ -20,6 +20,28 @@ Stripe
   → PostgreSQL (webhook_events / attempts / effects)
 ```
 
+## Operator access boundary
+
+The console has a single-operator bearer gate when `OPERATOR_API_KEY` is
+configured; production refuses to boot without a sufficiently long key.
+
+```text
+React console
+  → GET /auth/operator              public: is auth required?
+  → GET /api/auth/check             Bearer required
+  → remaining operator /api routes  Bearer required
+
+Public exceptions
+  → Stripe webhook receipt          Stripe signature
+  → GitHub OAuth callback           OAuth state + PKCE
+  → GitHub connect redirect         unguessable integration UUID; starts OAuth only
+  → /health + /ready                infrastructure probes
+```
+
+The key is entered at runtime and kept in browser `sessionStorage`; it is not
+compiled into the frontend. This is intentionally single-operator access, not
+multi-user identity/RBAC. See [threat-model.md](threat-model.md).
+
 ## Outbound vs inbound observability
 
 | | Outbound | Inbound |
@@ -209,7 +231,7 @@ prefix list is available. See [aws-deployment.md](aws-deployment.md) and
 - Continuous background monitoring or paging alerts
 - Real payment mutations or Stripe API writes
 - AI diagnosis
-- Application user login / multi-tenancy
+- Multi-user identity, RBAC, or multi-tenancy (single-operator bearer gate only)
 - Auto `terraform apply` from pull requests
 - NAT Gateway / Multi-AZ RDS in the default portfolio stack
 
@@ -226,5 +248,7 @@ explicitly added later.
 - [database.md](database.md)
 - [aws-deployment.md](aws-deployment.md)
 - [ci-cd.md](ci-cd.md)
+- [verification.md](verification.md)
+- [threat-model.md](threat-model.md)
 - [customer-case-study.md](customer-case-study.md)
 - [adr/](adr/)
