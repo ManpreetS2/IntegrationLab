@@ -197,13 +197,22 @@ jobs:
           set -euo pipefail
           BASE="${CLOUDFRONT_URL}"
           echo "Smoke testing ${BASE}"
+
           curl -fsS "${BASE}/health" | tee /tmp/health.json
           grep -q '"status":"ok"' /tmp/health.json
+
           curl -fsS "${BASE}/ready" | tee /tmp/ready.json
           grep -q '"database":"reachable"' /tmp/ready.json
-          curl -fsS "${BASE}/api/reliability/system" | tee /tmp/system.json
-          grep -q '"database":"healthy"' /tmp/system.json
+
+          curl -fsS "${BASE}/auth/operator" | tee /tmp/operator-auth.json
+          grep -q '"required":true' /tmp/operator-auth.json
+
+          STATUS="$(curl -sS -o /tmp/unauthorized.json -w "%{http_code}" "${BASE}/api/reliability/system")"
+          test "${STATUS}" = "401"
+          grep -q 'Operator authorization required' /tmp/unauthorized.json
+
           curl -fsS -o /tmp/index.html -w "%{http_code}" "${BASE}/" | tee /tmp/root.status
           grep -q 200 /tmp/root.status
           grep -qi '<html' /tmp/index.html
-          echo "Smoke tests passed"
+
+          echo "Smoke tests passed (public health + operator-auth enforcement + frontend)"
