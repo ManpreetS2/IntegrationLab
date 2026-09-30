@@ -9,8 +9,9 @@ duplicates, and dashboards that invent uptime instead of showing evidence.
 
 **Solution:** IntegrationLab gives engineers durable event handling,
 observability from real stored evidence, deterministic health and diagnostics,
-and an operator recovery workflow — packaged with CI and an AWS deployment
-architecture suitable for internship interviews.
+and an operator recovery workflow — protected by a runtime single-operator
+access gate and packaged with CI plus an AWS deployment architecture suitable
+for internship interviews.
 
 | Reader | Time | What to look at |
 |--------|------|-----------------|
@@ -61,6 +62,7 @@ probe GitHub when an operator asks. Details: [docs/architecture.md](docs/archite
 - Stripe webhooks: signature verification, dedupe, idempotent effects, 1s/2s/4s retries, failed queue
 - Reliability overview + failures feed + request metrics (p95)
 - Guided diagnostics with persisted runs/checks
+- Production-mode single-operator Bearer gate (runtime key; never baked into Vite)
 - Production Docker image + full local compose stack
 - GitHub Actions CI (tests, lint/build, Docker, Terraform validate)
 - Manual AWS deploy workflow (OIDC, migrate-before-deploy, smoke tests)
@@ -82,6 +84,8 @@ See [docs/reliability.md](docs/reliability.md) and [docs/diagnostics.md](docs/di
 - Stripe signature verification on the exact raw body
 - Secrets Manager for RDS + provider secrets in AWS
 - GitHub Actions → AWS via **OIDC** (no static access keys)
+- Production refuses to boot without a 24+ character operator key
+- Operator key stays in Secrets Manager/server config and browser sessionStorage, not the bundle
 - Diagnostics/reliability responses tested for secret leakage
 - Production image must not contain `.env` or Terraform state
 
@@ -113,12 +117,21 @@ cd backend && source .venv/bin/activate && pytest
 cd frontend && npm run lint && npm run build
 ```
 
-CI also builds the backend Docker image and validates Terraform.
+CI also builds both Docker images, validates Terraform, and boots the complete
+Compose stack. The `full-stack-smoke` job proves migrations, production-mode
+operator auth, an authenticated write, Failure Lab persistence, and reliability
+aggregation work together.
+
+```bash
+make full-verify
+```
+
+See [docs/verification.md](docs/verification.md) for the claim → evidence matrix.
 
 ## CI/CD
 
 - **CI** on every PR/`main` push: backend tests (Postgres 18 + `_test` guard),
-  frontend quality, container build, Terraform fmt/validate
+  frontend quality, both container builds, assembled-stack smoke, Terraform fmt/validate
 - **CD** is **manual** (`workflow_dispatch`) against GitHub Environment
   `production`: SHA image → migration task → ECS → S3 → CloudFront → smoke tests
 
@@ -181,6 +194,19 @@ one-shot `migrate` service (`alembic upgrade head`) that must complete
 successfully before the API container starts — the same pattern as the ECS
 one-off migration task.
 
+Compose runs in production mode, so the operator gate is enabled. The local
+default key is `local-demo-operator-key-change-me`; override it with
+`OPERATOR_API_KEY`.
+
+For an interview-ready deterministic dataset:
+
+```bash
+make demo
+```
+
+This populates explicitly simulated Failure Lab evidence and diagnostics without
+pretending that GitHub OAuth or Stripe delivery was externally verified.
+
 ## Screenshots
 
 _Placeholder — add Overview / Failures / Diagnostics / AWS diagram screenshots
@@ -212,7 +238,9 @@ Short ADRs live in [docs/adr/](docs/adr/):
 - AWS stack written and validated statically; apply is user-controlled
 - No continuous webhook worker / EventBridge scheduler by default
 - No alerts, multi-user auth, or data retention policy
-- CloudFront→ALB uses HTTP in the portfolio design (viewer HTTPS only)
+- Single-operator bearer access only; no user identity/RBAC/multi-tenancy
+- CloudFront→ALB uses HTTP in the portfolio design (viewer HTTPS only); real sensitive use should add origin TLS
+- No WAF/application rate limiter in the default stack
 
 ## What I learned
 
@@ -234,6 +262,8 @@ Short ADRs live in [docs/adr/](docs/adr/):
 | [aws-costs.md](docs/aws-costs.md) | Cost drivers |
 | [deployment.md](docs/deployment.md) | Migrate / rollback |
 | [ci-cd.md](docs/ci-cd.md) | Pipelines |
+| [verification.md](docs/verification.md) | Claim → automated evidence matrix |
+| [threat-model.md](docs/threat-model.md) | Trust boundaries, controls, residual risk |
 | [customer-case-study.md](docs/customer-case-study.md) | Incident exercise |
 | [interview-questions.md](docs/interview-questions.md) | Q&A |
 
@@ -241,9 +271,17 @@ Short ADRs live in [docs/adr/](docs/adr/):
 
 - AWS auto-apply / always-on expensive HA defaults
 - AI diagnosis
-- Multi-user auth
+- Multi-user identity / RBAC (single-operator bearer gate only)
 - Redis / Celery / EKS / Lambda rewrite
 
-## Next milestone
+## Completion status
 
-**Final portfolio polish + real provider verification + demo/screenshots**
+The repository-side engineering milestone is complete when PR CI is green:
+application behavior, Docker packaging, assembled-stack smoke, Terraform
+validation, operator access control, deployment workflow, incident exercise,
+verification matrix, and threat model are versioned together.
+
+The remaining acceptance work requires user-controlled external systems rather
+than more speculative code: real AWS apply, real GitHub OAuth, real Stripe CLI
+delivery, and final screenshots. Those remain explicitly unverified until they
+are actually run.
