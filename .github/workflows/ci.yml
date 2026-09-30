@@ -181,6 +181,37 @@ jobs:
           grep -q 'upgrade' /tmp/compose.full.yml
           echo "docker-compose.full.yml migrate → backend ordering present"
 
+
+  full-stack-smoke:
+    name: full-stack-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Boot assembled Compose stack
+        env:
+          OPERATOR_API_KEY: local-demo-operator-key-change-me
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.full.yml up -d --build
+
+      - name: Exercise frontend, auth, database, Failure Lab, and reliability
+        env:
+          OPERATOR_API_KEY: local-demo-operator-key-change-me
+        run: python3 scripts/ci/full_stack_smoke.py
+
+      - name: Show Compose diagnostics on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.full.yml ps
+          docker compose -f docker-compose.full.yml logs --no-color
+
+      - name: Tear down Compose stack
+        if: always()
+        env:
+          OPERATOR_API_KEY: local-demo-operator-key-change-me
+        run: docker compose -f docker-compose.full.yml down -v --remove-orphans
+
   terraform-quality:
     name: terraform-quality
     runs-on: ubuntu-latest
