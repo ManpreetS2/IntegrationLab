@@ -1,0 +1,77 @@
+# Full local container stack (production-like).
+#
+# Usage:
+#   docker compose -f docker-compose.full.yml up --build
+#
+# This does NOT replace the simple local workflow:
+#   docker compose up -d postgres
+#   uvicorn + npm run dev
+#
+# Frontend container is for local packaging only — AWS uses S3/CloudFront.
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: integrationlab-full-postgres
+    environment:
+      POSTGRES_USER: integrationlab
+      POSTGRES_PASSWORD: integrationlab
+      POSTGRES_DB: integrationlab
+    volumes:
+      - full_postgres_data:/var/lib/postgresql
+      - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U integrationlab -d integrationlab"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: integrationlab-full-backend
+    environment:
+      APP_ENV: production
+      APP_VERSION: local-compose
+      DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@postgres:5432/integrationlab
+      FRONTEND_URL: http://localhost:8080
+      GITHUB_OAUTH_REDIRECT_URI: http://localhost:8080/api/oauth/github/callback
+      # Optional — leave unset for not_configured diagnostics.
+      # GITHUB_CLIENT_ID:
+      # GITHUB_CLIENT_SECRET:
+      # TOKEN_ENCRYPTION_KEY:
+      # STRIPE_WEBHOOK_SECRET:
+      CORS_ORIGINS: '["http://localhost:8080"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: integrationlab-full-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  full_postgres_data:

@@ -29,9 +29,9 @@ app = FastAPI(
     title="IntegrationLab",
     description=(
         "Partner integration reliability console (GitHub OAuth, Failure Lab, Stripe webhooks, "
-        "reliability dashboard, guided diagnostics)"
+        "reliability dashboard, guided diagnostics, AWS deployment)"
     ),
-    version="0.6.0",
+    version="0.7.0",
 )
 
 app.add_middleware(

@@ -14,8 +14,10 @@ from app.core.config import get_settings
 settings = get_settings()
 
 # Application-global engine. Sessions are created per request via get_db().
+# settings.database_url is resolved from DATABASE_URL or AWS secret inputs;
+# never log it.
 engine = create_engine(
-    settings.database_url,
+    settings.require_database_url(),
     pool_pre_ping=True,
     # Fail fast when PostgreSQL is unreachable instead of hanging the request.
     connect_args={"connect_timeout": 3},

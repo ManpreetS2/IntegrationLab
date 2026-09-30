@@ -163,14 +163,58 @@ state. Valid state + `access_denied` marks the state used and redirects with
 `status=cancelled`. Missing, unknown, expired, or reused state → HTTP 400.
 `error_description` is never reflected.
 
+## AWS deployment architecture
+
+Infrastructure is defined in `infra/terraform` (apply is user-controlled).
+
+```mermaid
+flowchart TB
+  users[Internet users / Stripe / GitHub OAuth]
+  cf[CloudFront HTTPS]
+  s3[S3 frontend private + OAC]
+  alb[ALB HTTP :80]
+  ecs[ECS Fargate FastAPI]
+  rds[(RDS PostgreSQL private)]
+  sm[Secrets Manager]
+  ecr[ECR SHA-tagged images]
+  cw[CloudWatch Logs]
+  gha[GitHub Actions OIDC]
+  ghapi[GitHub API]
+  stripe[Stripe]
+
+  users --> cf
+  stripe -->|webhooks| cf
+  cf -->|static| s3
+  cf -->|/api /webhooks /health /ready| alb
+  alb -->|:8000 SG only| ecs
+  ecs --> rds
+  ecs --> sm
+  ecs --> ghapi
+  ecr --> ecs
+  ecs --> cw
+  gha -->|push/deploy| ecr
+  gha --> ecs
+  gha --> s3
+  gha --> cf
+```
+
+Cost-conscious portfolio topology: public ALB + public Fargate tasks with
+public IPs (no NAT), private RDS, CloudFront-restricted ALB when the managed
+prefix list is available. See [aws-deployment.md](aws-deployment.md) and
+[adr/005-public-fargate-no-nat-dev.md](adr/005-public-fargate-no-nat-dev.md).
+
 ## Intentional non-goals
 
-- Redis / Celery / queues / AWS
-- Background daemon (the worker runs as a single CLI tick)
-- Continuous background monitoring or alerts (health is computed on request)
+- Redis / Celery / SQS as a required runtime dependency
+- Continuous background monitoring or paging alerts
 - Real payment mutations or Stripe API writes
 - AI diagnosis
-- Application user login
+- Application user login / multi-tenancy
+- Auto `terraform apply` from pull requests
+- NAT Gateway / Multi-AZ RDS in the default portfolio stack
+
+Production background webhook scheduling is still operator/CLI triggered unless
+explicitly added later.
 
 ## Related docs
 
@@ -180,3 +224,7 @@ state. Valid state + `access_denied` marks the state used and redirects with
 - [failure-lab.md](failure-lab.md)
 - [github-oauth.md](github-oauth.md)
 - [database.md](database.md)
+- [aws-deployment.md](aws-deployment.md)
+- [ci-cd.md](ci-cd.md)
+- [customer-case-study.md](customer-case-study.md)
+- [adr/](adr/)

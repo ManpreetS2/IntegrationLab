@@ -1,0 +1,202 @@
+name: Deploy
+
+# Manual only — do not auto-spend AWS money on every push.
+# Enable automatic main deploys later only after infrastructure is intentionally online.
+on:
+  workflow_dispatch:
+    inputs:
+      desired_count:
+        description: "ECS desired task count after deploy"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "0"
+          - "1"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+  ECS_TASK_DEFINITION_FAMILY: ${{ vars.ECS_TASK_DEFINITION_FAMILY }}
+  ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
+  FRONTEND_BUCKET: ${{ vars.FRONTEND_BUCKET }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+  CLOUDFRONT_URL: ${{ vars.CLOUDFRONT_URL }}
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image (SHA tag)
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          docker build -f backend/Dockerfile -t "${IMAGE}" .
+          docker push "${IMAGE}"
+          echo "image=${IMAGE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download current task definition
+        run: |
+          set -euo pipefail
+          aws ecs describe-task-definition \
+            --task-definition "${ECS_TASK_DEFINITION_FAMILY}" \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Render task definition with new image
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.ECS_CONTAINER_NAME }}
+          image: ${{ steps.image.outputs.image }}
+          environment-variables: |
+            APP_VERSION=${{ github.sha }}
+
+      - name: Register task definition revision
+        id: register
+        env:
+          RENDERED_TASK_DEF: ${{ steps.render.outputs.task-definition }}
+        run: |
+          set -euo pipefail
+          # Strip fields ECS rejects on RegisterTaskDefinition.
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          src = Path(os.environ["RENDERED_TASK_DEF"])
+          data = json.loads(src.read_text())
+          for key in [
+              "taskDefinitionArn", "revision", "status", "requiresAttributes",
+              "compatibilities", "registeredAt", "registeredBy", "deregisteredAt",
+          ]:
+              data.pop(key, None)
+          Path("task-def-register.json").write_text(json.dumps(data))
+          PY
+          ARN="$(aws ecs register-task-definition \
+            --cli-input-json file://task-def-register.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)"
+          echo "task_definition_arn=${ARN}" >> "${GITHUB_OUTPUT}"
+          # Keep a clean file for the deploy action as well.
+          cp task-def-register.json rendered-task-definition.json
+
+      - name: Run database migration (one-off ECS task)
+        id: migrate
+        run: |
+          set -euo pipefail
+          NETWORK_CONFIG="$(aws ecs describe-services \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}" \
+            --query 'services[0].networkConfiguration' \
+            --output json)"
+          TASK_ARN="$(aws ecs run-task \
+            --cluster "${ECS_CLUSTER}" \
+            --task-definition "${{ steps.register.outputs.task_definition_arn }}" \
+            --launch-type FARGATE \
+            --network-configuration "${NETWORK_CONFIG}" \
+            --overrides "$(jq -nc \
+              --arg name "${ECS_CONTAINER_NAME}" \
+              '{containerOverrides:[{name:$name,command:["alembic","upgrade","head"]}]}')" \
+            --query 'tasks[0].taskArn' \
+            --output text)"
+          echo "Migration task: ${TASK_ARN}"
+          aws ecs wait tasks-stopped --cluster "${ECS_CLUSTER}" --tasks "${TASK_ARN}"
+          EXIT_CODE="$(aws ecs describe-tasks \
+            --cluster "${ECS_CLUSTER}" \
+            --tasks "${TASK_ARN}" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)"
+          echo "Migration exit code: ${EXIT_CODE}"
+          if [[ "${EXIT_CODE}" != "0" ]]; then
+            echo "Migration failed — aborting deploy" >&2
+            exit 1
+          fi
+
+      - name: Deploy ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: rendered-task-definition.json
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          desired-count: ${{ github.event.inputs.desired_count }}
+
+      - name: Setup Node for frontend build
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend (same-origin API)
+        working-directory: frontend
+        env:
+          VITE_API_URL: ""
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Sync frontend to S3
+        run: |
+          set -euo pipefail
+          aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}/" \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+          aws s3 cp frontend/dist/index.html "s3://${FRONTEND_BUCKET}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+
+      - name: Invalidate CloudFront
+        run: |
+          set -euo pipefail
+          aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --paths "/index.html" "/*"
+
+      - name: Smoke tests through CloudFront
+        run: |
+          set -euo pipefail
+          BASE="${CLOUDFRONT_URL}"
+          echo "Smoke testing ${BASE}"
+          curl -fsS "${BASE}/health" | tee /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+          curl -fsS "${BASE}/ready" | tee /tmp/ready.json
+          grep -q '"database":"reachable"' /tmp/ready.json
+          curl -fsS "${BASE}/api/reliability/system" | tee /tmp/system.json
+          grep -q '"database":"healthy"' /tmp/system.json
+          curl -fsS -o /tmp/index.html -w "%{http_code}" "${BASE}/" | tee /tmp/root.status
+          grep -q 200 /tmp/root.status
+          grep -qi '<html' /tmp/index.html
+          echo "Smoke tests passed"

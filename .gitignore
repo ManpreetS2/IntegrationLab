@@ -29,6 +29,7 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!frontend/.env.production
 
 # Editors / OS
 .idea/
@@ -57,3 +58,23 @@ docker-data/
 # Alembic / local override
 backend/.env
 .env.local
+
+# Terraform — never commit state, plans, or downloaded plugins.
+# Do commit .terraform.lock.hcl for reproducible provider versions.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.auto.tfvars
+!*.tfvars.example
+
+# Local AWS / deploy scratch
+scripts/aws/.secrets/
+*.pem

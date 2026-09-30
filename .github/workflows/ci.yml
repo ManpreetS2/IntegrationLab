@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: backend-tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: integrationlab
+          POSTGRES_PASSWORD: integrationlab
+          POSTGRES_DB: integrationlab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U integrationlab -d integrationlab_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@localhost:5432/integrationlab_test
+      TEST_DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@localhost:5432/integrationlab_test
+      # Clearly fake test-only values — never production secrets.
+      # Valid Fernet key bytes, clearly test-only (not a production secret).
+      TOKEN_ENCRYPTION_KEY: "dGVzdC1mZXJuZXQta2V5LTMyYnl0ZXMtYWJjZGVmZ2g="
+      GITHUB_CLIENT_ID: test-github-client-id
+      GITHUB_CLIENT_SECRET: test-github-client-secret
+      GITHUB_OAUTH_REDIRECT_URI: http://localhost:8000/api/oauth/github/callback
+      FRONTEND_URL: http://localhost:5173
+      STRIPE_WEBHOOK_SECRET: whsec_test_example
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if python - <<'PY'
+          import sys
+          import psycopg
+          try:
+              with psycopg.connect(
+                  "postgresql://integrationlab:integrationlab@localhost:5432/integrationlab_test",
+                  connect_timeout=2,
+              ) as conn:
+                  conn.execute("SELECT 1")
+              sys.exit(0)
+          except Exception:
+              sys.exit(1)
+          PY
+            then
+              echo "PostgreSQL ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready" >&2
+          exit 1
+
+      - name: Assert test database guard (_test suffix)
+        run: |
+          python - <<'PY'
+          from urllib.parse import urlparse
+          import os
+          url = os.environ["TEST_DATABASE_URL"]
+          name = urlparse(url.replace("postgresql+psycopg", "postgresql", 1)).path.lstrip("/")
+          assert name.endswith("_test"), name
+          print(f"Safe test database: {name}")
+          PY
+
+      - name: Migrate test database
+        run: alembic upgrade head
+
+      - name: Run pytest
+        run: pytest -q
+
+  frontend-quality:
+    name: frontend-quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build (same-origin API)
+        run: npm run build
+        env:
+          VITE_API_URL: ""
+
+      - name: Assert production bundle has no localhost API default
+        run: |
+          set -euo pipefail
+          if grep -R "localhost:8000" dist/assets --include='*.js'; then
+            echo "Production bundle must not hardcode localhost:8000" >&2
+            exit 1
+          fi
+          echo "Production bundle OK (no localhost:8000)"
+
+  backend-container:
+    name: backend-container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build production backend image
+        run: |
+          set -euo pipefail
+          docker build -f backend/Dockerfile -t "integrationlab-backend:${GITHUB_SHA}" .
+
+      - name: Inspect image for forbidden files
+        run: |
+          set -euo pipefail
+          cid="$(docker create "integrationlab-backend:${GITHUB_SHA}")"
+          cleanup() { docker rm -f "$cid" >/dev/null; }
+          trap cleanup EXIT
+          # Fail if .env or terraform state leaked into the image.
+          if docker export "$cid" | tar -t | grep -E '(\.env$|\.env\.|tfstate|aws/credentials|\.git/)'; then
+            echo "Forbidden files found in image" >&2
+            exit 1
+          fi
+          echo "Image contents look clean"
+
+  terraform-quality:
+    name: terraform-quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (no backend)
+        run: terraform init -backend=false
+
+      - name: terraform validate
+        run: terraform validate
