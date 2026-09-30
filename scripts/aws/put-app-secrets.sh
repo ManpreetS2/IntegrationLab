@@ -3,6 +3,7 @@
 #
 # Usage (values from the environment — never echoed):
 #   export APP_SECRET_ARN=arn:aws:secretsmanager:...
+#   export OPERATOR_API_KEY=...
 #   export GITHUB_CLIENT_ID=...
 #   export GITHUB_CLIENT_SECRET=...
 #   export TOKEN_ENCRYPTION_KEY=...
@@ -36,6 +37,11 @@ prompt_if_empty() {
   printf -v "${var_name}" '%s' "${value}"
 }
 
+prompt_if_empty OPERATOR_API_KEY "OPERATOR_API_KEY" 1
+if (( ${#OPERATOR_API_KEY} < 24 )); then
+  echo "OPERATOR_API_KEY must be at least 24 characters" >&2
+  exit 1
+fi
 prompt_if_empty GITHUB_CLIENT_ID "GITHUB_CLIENT_ID"
 prompt_if_empty GITHUB_CLIENT_SECRET "GITHUB_CLIENT_SECRET" 1
 prompt_if_empty TOKEN_ENCRYPTION_KEY "TOKEN_ENCRYPTION_KEY" 1
@@ -45,7 +51,7 @@ TMP="$(mktemp)"
 cleanup() { rm -f "${TMP}"; }
 trap cleanup EXIT
 
-export GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET TOKEN_ENCRYPTION_KEY STRIPE_WEBHOOK_SECRET
+export OPERATOR_API_KEY GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET TOKEN_ENCRYPTION_KEY STRIPE_WEBHOOK_SECRET
 
 # Write JSON without printing secret values to the terminal.
 python3 - <<'PY' >"${TMP}"
@@ -53,6 +59,7 @@ import json
 import os
 
 payload = {
+    "OPERATOR_API_KEY": os.environ["OPERATOR_API_KEY"],
     "GITHUB_CLIENT_ID": os.environ["GITHUB_CLIENT_ID"],
     "GITHUB_CLIENT_SECRET": os.environ["GITHUB_CLIENT_SECRET"],
     "TOKEN_ENCRYPTION_KEY": os.environ["TOKEN_ENCRYPTION_KEY"],
