@@ -38,6 +38,15 @@ GitHub Environment `production`.
 - Validates `docker-compose.full.yml` includes migrate →
   `service_completed_successfully` → backend ordering
 
+### full-stack-smoke
+
+- Boots the real `docker-compose.full.yml` stack
+- Waits for Postgres → one-shot Alembic migration → backend → frontend
+- Confirms production-mode operator auth rejects an unauthenticated `/api` call
+- Confirms an authorized operator can create data and run Failure Lab
+- Reads the persisted run back and verifies reliability aggregation sees it
+- Confirms simulated failures do not change live health to degraded/failed
+
 ### terraform-quality
 
 - Terraform 1.16.4
@@ -61,7 +70,7 @@ Deploy: `contents: read` + `id-token: write` for OIDC. No `write-all`.
 6. Deploy service at desired count **1**; wait for stability
 7. Build frontend (same-origin API); sync to S3
 8. CloudFront invalidation
-9. Smoke tests through CloudFront URL
+9. Smoke tests through CloudFront: health/readiness, frontend HTML, and unauthenticated operator API → 401
 
 Scale-to-zero is a separate manual ops action, not part of a successful deploy.
 
@@ -73,6 +82,7 @@ Require these checks before merge to `main`:
 - `frontend-quality`
 - `backend-container`
 - `frontend-container`
+- `full-stack-smoke`
 - `terraform-quality`
 
 Do not modify repository branch protection from automation unless explicitly
