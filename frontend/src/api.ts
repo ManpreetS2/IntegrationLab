@@ -1,17 +1,26 @@
 /** Thin HTTP helpers for talking to the FastAPI backend. */
 
 import type {
+  DiagnosticRun,
+  DiagnosticRunListItem,
+  FailureItem,
   FailureLabRun,
   FailureLabRunListItem,
   FailureScenarioId,
   FailureScenarioInfo,
+  FailureSource,
   GitHubCheckResult,
   GitHubConnection,
   HealthResponse,
   Integration,
   IntegrationCreateRequest,
+  IntegrationProvider,
+  IntegrationReliabilityDetail,
   ProcessDueResult,
   ProviderRequestLog,
+  ReliabilityOverview,
+  RequestMetricsResponse,
+  SystemHealth,
   WebhookEventDetail,
   WebhookEventSummary,
   WebhookProcessingStatus,
@@ -19,6 +28,26 @@ import type {
 } from './types'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
+/** Non-2xx response from the API. `message` keeps the raw detail text for existing callers. */
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+function toQuery(params: Record<string, string | number | boolean | undefined | null>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') search.set(key, String(value))
+  }
+  const query = search.toString()
+  return query ? `?${query}` : ''
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // Default Content-Type first, then merge caller headers so they can
@@ -37,7 +66,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const detail = await response.text()
-    throw new Error(detail || `Request failed with status ${response.status}`)
+    throw new ApiError(response.status, detail || `Request failed with status ${response.status}`)
   }
 
   return response.json() as Promise<T>
@@ -165,6 +194,56 @@ export function dismissWebhookEvent(eventId: string): Promise<WebhookEventDetail
 
 export function processDueWebhookEvents(limit = 25): Promise<ProcessDueResult> {
   return request<ProcessDueResult>(`${WEBHOOKS}/process-due?limit=${limit}`, { method: 'POST' })
+}
+
+// ------------------------------------------------------------ reliability
+
+const RELIABILITY = '/api/reliability'
+
+export function getReliabilitySystem(): Promise<SystemHealth> {
+  return request<SystemHealth>(`${RELIABILITY}/system`)
+}
+
+export function getReliabilityOverview(windowHours = 24): Promise<ReliabilityOverview> {
+  return request<ReliabilityOverview>(`${RELIABILITY}/overview${toQuery({ window_hours: windowHours })}`)
+}
+
+export function getIntegrationReliability(integrationId: string): Promise<IntegrationReliabilityDetail> {
+  return request<IntegrationReliabilityDetail>(`${RELIABILITY}/integrations/${integrationId}`)
+}
+
+export function listReliabilityFailures(params: {
+  provider?: IntegrationProvider
+  integration_id?: string
+  source?: FailureSource
+  include_simulated?: boolean
+  window_hours?: number
+  limit?: number
+}): Promise<FailureItem[]> {
+  return request<FailureItem[]>(`${RELIABILITY}/failures${toQuery(params)}`)
+}
+
+export function getRequestMetrics(params: {
+  provider?: string
+  integration_id?: string
+  is_simulated?: boolean
+  window_hours?: number
+}): Promise<RequestMetricsResponse> {
+  return request<RequestMetricsResponse>(`${RELIABILITY}/request-metrics${toQuery(params)}`)
+}
+
+// ------------------------------------------------------------ diagnostics
+
+export function runDiagnostics(integrationId: string): Promise<DiagnosticRun> {
+  return request<DiagnosticRun>(`/api/diagnostics/${integrationId}/run`, { method: 'POST' })
+}
+
+export function listDiagnosticRuns(integrationId: string, limit = 20): Promise<DiagnosticRunListItem[]> {
+  return request<DiagnosticRunListItem[]>(`/api/diagnostics/${integrationId}/runs${toQuery({ limit })}`)
+}
+
+export function getDiagnosticRun(runId: string): Promise<DiagnosticRun> {
+  return request<DiagnosticRun>(`/api/diagnostics/runs/${runId}`)
 }
 
 export { API_URL }
