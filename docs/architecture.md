@@ -207,7 +207,7 @@ flowchart TB
   users --> cf
   stripe -->|webhooks| cf
   cf -->|static| s3
-  cf -->|/api /webhooks /health /ready| alb
+  cf -->|/api /webhooks /health /ready /auth/operator| alb
   alb -->|:8000 SG only| ecs
   ecs --> rds
   ecs --> sm

@@ -12,7 +12,7 @@ accept that cost. Pull request CI never applies Terraform.
 Browser
   → CloudFront (HTTPS)
        ├── static assets → private S3 (OAC)
-       └── /api /webhooks /health /ready → ALB :80
+       └── /api /webhooks /health /ready /auth/operator → ALB :80
                                             → ECS Fargate FastAPI
                                                → RDS PostgreSQL (private)
                                                → Secrets Manager

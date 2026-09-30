@@ -126,6 +126,7 @@ resource "aws_cloudfront_distribution" "main" {
       "/webhooks/*",
       "/health",
       "/ready",
+      "/auth/operator",
       "/docs",
       "/docs/*",
       "/openapi.json",

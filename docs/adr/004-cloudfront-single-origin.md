@@ -6,7 +6,8 @@ managing a custom domain/ACM for the portfolio environment.
 
 ## Decision
 CloudFront serves S3 (OAC) for static assets and routes `/api/*`, `/webhooks/*`,
-`/health`, `/ready` to an ALB origin with caching disabled. Frontend builds with
+`/health`, `/ready`, `/auth/operator` to an ALB origin with caching disabled.
+Frontend builds with
 `VITE_API_URL=""`.
 
 ## Alternatives

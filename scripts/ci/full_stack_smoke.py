@@ -78,12 +78,14 @@ def request(
         return status, body
 
 
-def request_frontend() -> str:
-    with urllib.request.urlopen(f"{FRONTEND_BASE}/", timeout=8) as response:
-        body = response.read().decode()
-        if response.status != 200:
-            raise SmokeFailure(f"frontend returned {response.status}")
-        return body
+def request_frontend(path: str = "/") -> tuple[int, str]:
+    """Hit the frontend origin (nginx), not the backend port directly."""
+    req = urllib.request.Request(f"{FRONTEND_BASE}{path}", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=8) as response:
+            return response.status, response.read().decode()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode()
 
 
 def wait_for_stack(timeout_seconds: int = 120) -> None:
@@ -92,7 +94,9 @@ def wait_for_stack(timeout_seconds: int = 120) -> None:
     while time.monotonic() < deadline:
         try:
             request("GET", "/health", auth=False)
-            html = request_frontend()
+            status, html = request_frontend("/")
+            if status != 200:
+                raise SmokeFailure(f"frontend returned {status}")
             if "IntegrationLab" not in html:
                 raise SmokeFailure("frontend HTML does not contain IntegrationLab")
             return
@@ -124,10 +128,47 @@ def main() -> int:
     if auth_status != {"required": True}:
         raise SmokeFailure(f"production-mode auth gate not enabled: {auth_status}")
 
+    # Same-origin path used by the browser unlock screen (nginx → backend).
+    # This catches regressions where /auth/operator falls through to index.html.
+    status, auth_via_frontend = request_frontend("/auth/operator")
+    if status != 200:
+        raise SmokeFailure(
+            f"frontend origin /auth/operator returned {status}: {auth_via_frontend[:200]}"
+        )
+    try:
+        auth_payload = json.loads(auth_via_frontend)
+    except json.JSONDecodeError as exc:
+        raise SmokeFailure(
+            "frontend origin /auth/operator did not return JSON "
+            f"(likely SPA fallback): {auth_via_frontend[:200]}"
+        ) from exc
+    if auth_payload != {"required": True}:
+        raise SmokeFailure(
+            f"frontend origin /auth/operator unexpected body: {auth_payload}"
+        )
+
     request("GET", "/api/auth/check", auth=False, expected={401})
     _, authorized = request("GET", "/api/auth/check")
     if authorized != {"authorized": True}:
         raise SmokeFailure(f"authorized check returned unexpected body: {authorized}")
+
+    # Wrong key must fail even when Authorization header is present.
+    wrong = urllib.request.Request(
+        f"{API_BASE}/api/auth/check",
+        headers={
+            "Accept": "application/json",
+            "Authorization": "Bearer definitely-not-the-operator-key",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(wrong, timeout=8) as response:
+            raise SmokeFailure(
+                f"wrong operator key unexpectedly succeeded with {response.status}"
+            )
+    except urllib.error.HTTPError as exc:
+        if exc.code != 401:
+            raise SmokeFailure(f"wrong operator key returned {exc.code}, expected 401")
 
     _, ready = request("GET", "/ready", auth=False)
     if ready.get("database") != "reachable":

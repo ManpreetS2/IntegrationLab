@@ -22,7 +22,7 @@ CloudFront (HTTPS)
 | Compute | ECS cluster (Fargate), task definition, service (`desired_count` default `0`) |
 | Data | RDS PostgreSQL (single-AZ, encrypted, private) |
 | Secrets | App secret + RDS-managed master password |
-| Edge | S3 frontend bucket (blocked public) + CloudFront OAC |
+| Edge | S3 frontend bucket (blocked public) + CloudFront OAC (`/auth/operator` routed to ALB) |
 | Registry | ECR `integrationlab-backend` (immutable tags, scan on push) |
 | Logs | CloudWatch log group `/ecs/integrationlab-backend` (14-day retention) |
 | CI/CD IAM | GitHub OIDC provider + deploy role (no access keys) |
