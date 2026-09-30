@@ -106,17 +106,20 @@ def test_merge_app_secrets_env_overrides_json() -> None:
     merged = merge_app_secrets(
         app_secrets_json=json.dumps(
             {
+                "OPERATOR_API_KEY": "operator-key-from-secret-1234567890",
                 "GITHUB_CLIENT_ID": "from-secret",
                 "GITHUB_CLIENT_SECRET": "secret-value",
                 "TOKEN_ENCRYPTION_KEY": "key-from-secret",
                 "STRIPE_WEBHOOK_SECRET": "whsec_from_secret",
             }
         ),
+        operator_api_key="operator-key-from-env-123456789012",
         github_client_id="from-env",
         github_client_secret=None,
         token_encryption_key=None,
         stripe_webhook_secret=None,
     )
+    assert merged["operator_api_key"] == "operator-key-from-env-123456789012"
     assert merged["github_client_id"] == "from-env"
     assert merged["github_client_secret"] == "secret-value"
     assert merged["token_encryption_key"] == "key-from-secret"
@@ -126,11 +129,13 @@ def test_merge_app_secrets_env_overrides_json() -> None:
 def test_merge_app_secrets_tolerates_malformed_json() -> None:
     merged = merge_app_secrets(
         app_secrets_json="{bad",
+        operator_api_key=None,
         github_client_id="env-id",
         github_client_secret=None,
         token_encryption_key=None,
         stripe_webhook_secret=None,
     )
+    assert merged["operator_api_key"] is None
     assert merged["github_client_id"] == "env-id"
     assert merged["github_client_secret"] is None
 
@@ -157,6 +162,7 @@ def test_settings_resolve_from_aws_pieces(monkeypatch) -> None:
         "INTEGRATIONLAB_APP_SECRETS",
         json.dumps(
             {
+                "OPERATOR_API_KEY": "prod-operator-key-123456789012345",
                 "GITHUB_CLIENT_ID": "cid",
                 "GITHUB_CLIENT_SECRET": "csecret",
                 "TOKEN_ENCRYPTION_KEY": "enc-key",
@@ -169,6 +175,7 @@ def test_settings_resolve_from_aws_pieces(monkeypatch) -> None:
     assert settings.database_url == (
         "postgresql+psycopg://admin:s3cret@rds.internal:5432/integrationlab"
     )
+    assert settings.operator_api_key == "prod-operator-key-123456789012345"
     assert settings.github_client_id == "cid"
     assert settings.stripe_webhook_secret == "whsec_test_example"
     get_settings.cache_clear()
@@ -199,4 +206,33 @@ def test_startup_log_does_not_include_database_url(caplog, monkeypatch) -> None:
     assert "secret_pass" not in caplog.text
     assert "secret_user" not in caplog.text
     assert "postgresql+psycopg" not in caplog.text
+    get_settings.cache_clear()
+
+
+
+def test_settings_production_requires_operator_key(monkeypatch) -> None:
+    get_settings.cache_clear()
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://user:pass@localhost:5432/integrationlab",
+    )
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("OPERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("INTEGRATIONLAB_APP_SECRETS", raising=False)
+    with pytest.raises(ValueError, match="OPERATOR_API_KEY"):
+        Settings(_env_file=None)
+    get_settings.cache_clear()
+
+
+def test_settings_production_rejects_short_operator_key(monkeypatch) -> None:
+    get_settings.cache_clear()
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://user:pass@localhost:5432/integrationlab",
+    )
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("OPERATOR_API_KEY", "too-short")
+    monkeypatch.delenv("INTEGRATIONLAB_APP_SECRETS", raising=False)
+    with pytest.raises(ValueError, match="at least"):
+        Settings(_env_file=None)
     get_settings.cache_clear()

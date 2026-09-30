@@ -22,6 +22,7 @@ from app.core.secrets import SecretConfigError, build_database_url, merge_app_se
 logger = logging.getLogger(__name__)
 
 AppEnv = Literal["development", "test", "production"]
+MIN_OPERATOR_API_KEY_LENGTH = 24
 
 
 class Settings(BaseSettings):
@@ -59,6 +60,10 @@ class Settings(BaseSettings):
         ]
     )
 
+    # Single-operator gate. Optional for local development/tests; required in production.
+    # AWS loads it from INTEGRATIONLAB_APP_SECRETS.
+    operator_api_key: str | None = None
+
     # Optional GitHub OAuth settings — app boots without them; OAuth routes fail clearly.
     github_client_id: str | None = None
     github_client_secret: str | None = None
@@ -72,14 +77,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def resolve_secrets_and_database(self) -> Settings:
-        """Fill optional secrets from JSON, then resolve DATABASE_URL."""
+        """Fill app secrets, resolve DATABASE_URL, then enforce production guards."""
         merged = merge_app_secrets(
             app_secrets_json=self.integrationlab_app_secrets,
+            operator_api_key=self.operator_api_key,
             github_client_id=self.github_client_id,
             github_client_secret=self.github_client_secret,
             token_encryption_key=self.token_encryption_key,
             stripe_webhook_secret=self.stripe_webhook_secret,
         )
+        object.__setattr__(self, "operator_api_key", merged["operator_api_key"])
         object.__setattr__(self, "github_client_id", merged["github_client_id"])
         object.__setattr__(self, "github_client_secret", merged["github_client_secret"])
         object.__setattr__(self, "token_encryption_key", merged["token_encryption_key"])
@@ -108,6 +115,15 @@ class Settings(BaseSettings):
                 "(postgresql+psycopg://...). SQLite fallback is not supported."
             )
         object.__setattr__(self, "database_url", resolved)
+
+        if self.app_env == "production":
+            key = self.operator_api_key or ""
+            if len(key) < MIN_OPERATOR_API_KEY_LENGTH:
+                raise ValueError(
+                    "Production requires OPERATOR_API_KEY (directly or in "
+                    "INTEGRATIONLAB_APP_SECRETS) with at least "
+                    f"{MIN_OPERATOR_API_KEY_LENGTH} characters."
+                )
         return self
 
     def require_database_url(self) -> str:
@@ -125,6 +141,10 @@ class Settings(BaseSettings):
             and self.token_encryption_key
         )
 
+    def operator_auth_required(self) -> bool:
+        """Whether operator /api routes require a bearer key."""
+        return bool(self.operator_api_key)
+
     def is_production(self) -> bool:
         return self.app_env == "production"
 
@@ -133,10 +153,11 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Cached settings instance for the process lifetime."""
     settings = Settings()
-    # Never log connection strings or secret payloads.
+    # Never log connection strings, API keys, or secret payloads.
     logger.info(
-        "IntegrationLab starting (env=%s version=%s)",
+        "IntegrationLab starting (env=%s version=%s operator_auth=%s)",
         settings.app_env,
         settings.app_version or "unknown",
+        "required" if settings.operator_auth_required() else "disabled",
     )
     return settings

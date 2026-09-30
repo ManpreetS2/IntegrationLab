@@ -23,7 +23,6 @@ def _encode_userinfo(value: str) -> str:
     return quote(value, safe="")
 
 
-
 class SecretConfigError(ValueError):
     """Raised when a required secret payload cannot be used safely."""
 
@@ -107,6 +106,7 @@ def build_database_url(
 def merge_app_secrets(
     *,
     app_secrets_json: str | None,
+    operator_api_key: str | None,
     github_client_id: str | None,
     github_client_secret: str | None,
     token_encryption_key: str | None,
@@ -115,11 +115,12 @@ def merge_app_secrets(
     """Merge INTEGRATIONLAB_APP_SECRETS with explicit environment overrides.
 
     Explicit environment variables always win when set. Malformed JSON leaves
-    optional provider features unset (they already degrade to not_configured)
-    rather than crashing the whole process — unless production startup later
-    decides otherwise for database configuration.
+    optional provider features unset. In production, Settings separately
+    requires the operator key so a malformed/missing app secret cannot silently
+    expose the operator API.
     """
     merged: dict[str, str | None] = {
+        "operator_api_key": operator_api_key,
         "github_client_id": github_client_id,
         "github_client_secret": github_client_secret,
         "token_encryption_key": token_encryption_key,
@@ -129,13 +130,13 @@ def merge_app_secrets(
     try:
         secret = parse_secret_json(app_secrets_json, label="INTEGRATIONLAB_APP_SECRETS")
     except SecretConfigError:
-        # Optional providers can remain not_configured; never echo the payload.
         return merged
 
     if not secret:
         return merged
 
     key_map = {
+        "OPERATOR_API_KEY": "operator_api_key",
         "GITHUB_CLIENT_ID": "github_client_id",
         "GITHUB_CLIENT_SECRET": "github_client_secret",
         "TOKEN_ENCRYPTION_KEY": "token_encryption_key",
