@@ -109,6 +109,7 @@ class WebhookProcessingAttemptORM(Base):
     retryable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     scheduled_delay_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    correlation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
 
 
 class WebhookEffectORM(Base):

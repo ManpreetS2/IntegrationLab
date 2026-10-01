@@ -215,6 +215,8 @@ class WebhookAttemptRepository:
         started_at: datetime,
         manual: bool,
     ) -> WebhookProcessingAttemptORM:
+        from app.core.correlation import get_correlation_id
+
         attempt = WebhookProcessingAttemptORM(
             id=uuid4(),
             webhook_event_id=event.id,
@@ -224,6 +226,7 @@ class WebhookAttemptRepository:
             started_at=started_at,
             outcome="in_progress",
             manual=manual,
+            correlation_id=get_correlation_id(),
         )
         session.add(attempt)
         session.flush()

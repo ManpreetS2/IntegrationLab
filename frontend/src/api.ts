@@ -14,14 +14,23 @@ import type {
   GitHubConnection,
   HealthResponse,
   Integration,
+  CaseSeverity,
+  CaseStatus,
+  EvidenceType,
   IntegrationCreateRequest,
   IntegrationProvider,
   IntegrationReliabilityDetail,
+  OperatorAuditEvent,
   ProcessDueResult,
   ProviderRequestLog,
   ReliabilityOverview,
   RequestMetricsResponse,
+  SupportCase,
+  SupportCaseDetail,
+  SupportCaseEvidence,
+  SupportCaseNote,
   SystemHealth,
+  TimelineItem,
   WebhookEventDetail,
   WebhookEventSummary,
   WebhookProcessingStatus,
@@ -286,6 +295,88 @@ export function listDiagnosticRuns(integrationId: string, limit = 20): Promise<D
 
 export function getDiagnosticRun(runId: string): Promise<DiagnosticRun> {
   return request<DiagnosticRun>(`/api/diagnostics/runs/${runId}`)
+}
+
+// ------------------------------------------------------------ support operations
+
+export function listSupportCases(params?: {
+  status?: CaseStatus
+  severity?: CaseSeverity
+  integration_id?: string
+  environment?: string
+  open_only?: boolean
+}): Promise<SupportCase[]> {
+  return request<SupportCase[]>(`/api/support-cases${toQuery(params ?? {})}`)
+}
+
+export function createSupportCase(payload: {
+  integration_id: string
+  title: string
+  severity?: CaseSeverity
+  impact_summary?: string
+  suspected_cause?: string
+  source_evidence_type?: EvidenceType
+  source_evidence_id?: string
+}): Promise<SupportCaseDetail> {
+  return request<SupportCaseDetail>('/api/support-cases', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getSupportCase(caseId: string): Promise<SupportCaseDetail> {
+  return request<SupportCaseDetail>(`/api/support-cases/${caseId}`)
+}
+
+export function updateSupportCase(
+  caseId: string,
+  payload: Partial<{
+    title: string
+    severity: CaseSeverity
+    status: CaseStatus
+    owner: string
+    impact_summary: string
+    suspected_cause: string
+    confirmed_root_cause: string
+    mitigation_summary: string
+    resolution_summary: string
+  }>,
+): Promise<SupportCaseDetail> {
+  return request<SupportCaseDetail>(`/api/support-cases/${caseId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getSupportCaseTimeline(caseId: string): Promise<TimelineItem[]> {
+  return request<TimelineItem[]>(`/api/support-cases/${caseId}/timeline`)
+}
+
+export function addSupportCaseNote(caseId: string, body: string): Promise<SupportCaseNote> {
+  return request<SupportCaseNote>(`/api/support-cases/${caseId}/notes`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  })
+}
+
+export function pinSupportCaseEvidence(
+  caseId: string,
+  payload: { evidence_type: EvidenceType; evidence_id: string; safe_label?: string },
+): Promise<SupportCaseEvidence> {
+  return request<SupportCaseEvidence>(`/api/support-cases/${caseId}/evidence`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function listAuditEvents(params?: {
+  action?: string
+  integration_id?: string
+  support_case_id?: string
+  correlation_id?: string
+  limit?: number
+}): Promise<OperatorAuditEvent[]> {
+  return request<OperatorAuditEvent[]>(`/api/audit-events${toQuery(params ?? {})}`)
 }
 
 export { API_URL }

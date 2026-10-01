@@ -22,6 +22,8 @@ Stripe worked on the public internet.
 | Failure Lab persists evidence | Full-stack smoke runs a simulated 429 and reads it back |
 | Simulations do not poison live health | Full-stack smoke checks the integration remains non-failed/non-degraded |
 | Reliability aggregation works across the assembled stack | Full-stack smoke checks DB health + operational counters |
+| Support case workflow on assembled stack | Full-stack smoke creates a case from Failure Lab evidence, pins, notes, transitions, timeline + audit |
+| Support case lifecycle / audit / correlation unit coverage | `backend/tests/test_support_cases.py` |
 
 ## One-command local verification
 

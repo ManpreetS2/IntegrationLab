@@ -161,6 +161,8 @@ class ProviderRequestLogRepository:
         is_simulated: bool = False,
         scenario: str | None = None,
     ) -> ProviderRequestLogORM:
+        from app.core.correlation import get_correlation_id
+
         row = ProviderRequestLogORM(
             id=uuid4(),
             integration_id=integration_id,
@@ -174,6 +176,7 @@ class ProviderRequestLogRepository:
             rate_limit_remaining=rate_limit_remaining,
             is_simulated=is_simulated,
             scenario=scenario,
+            correlation_id=get_correlation_id(),
         )
         session.add(row)
         session.flush()

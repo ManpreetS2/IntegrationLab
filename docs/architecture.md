@@ -2,8 +2,10 @@
 
 IntegrationLab has three evidence-producing flows: real outbound calls to
 GitHub, simulated outbound calls from Failure Lab, and inbound Stripe webhooks.
-Two operator flows sit on top of that evidence: the reliability dashboard, which
-only reads it, and guided diagnostics, which actively collects more.
+Three operator flows sit on top of that evidence: the reliability dashboard,
+which only reads it; guided diagnostics, which actively collects more; and
+Support Cases, which organize investigations with pinned evidence, notes, audit,
+and a derived timeline (see [support-operations.md](support-operations.md)).
 
 ## High-level
 
@@ -242,6 +244,7 @@ explicitly added later.
 
 - [reliability.md](reliability.md)
 - [diagnostics.md](diagnostics.md)
+- [support-operations.md](support-operations.md)
 - [stripe-webhooks.md](stripe-webhooks.md)
 - [failure-lab.md](failure-lab.md)
 - [github-oauth.md](github-oauth.md)

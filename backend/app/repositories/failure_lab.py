@@ -32,6 +32,8 @@ class FailureLabRunRepository:
         recommended_checks: str | None,
         rate_limit_remaining: int | None,
     ) -> FailureLabRunORM:
+        from app.core.correlation import get_correlation_id
+
         row = FailureLabRunORM(
             id=uuid4(),
             integration_id=integration_id,
@@ -49,6 +51,7 @@ class FailureLabRunRepository:
             evidence_summary=evidence_summary,
             recommended_checks=recommended_checks,
             rate_limit_remaining=rate_limit_remaining,
+            correlation_id=get_correlation_id(),
             created_at=datetime.now(timezone.utc),
         )
         session.add(row)

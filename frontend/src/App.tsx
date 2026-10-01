@@ -3,11 +3,13 @@ import { API_URL, ApiError, createIntegration, getReliabilitySystem, listIntegra
 import SectionStatus from './components/SectionStatus'
 import StripeWebhooksPanel from './components/StripeWebhooksPanel'
 import { PAGES, pageHref, useHashRoute, useResource } from './hooks'
+import AuditPage from './pages/AuditPage'
 import DiagnosticsPage from './pages/DiagnosticsPage'
 import FailuresPage from './pages/FailuresPage'
 import IntegrationsPage from './pages/IntegrationsPage'
 import OverviewPage from './pages/OverviewPage'
 import RequestsPage from './pages/RequestsPage'
+import SupportCasesPage from './pages/SupportCasesPage'
 import type { IntegrationProvider } from './types'
 
 const SYSTEM_POLL_MS = 30_000
@@ -71,7 +73,7 @@ function App() {
       <header className="app-header">
         <div>
           <h1>IntegrationLab</h1>
-          <p className="subtitle">Partner Integration Reliability Console</p>
+          <p className="subtitle">Partner Integration Support &amp; Reliability Console</p>
         </div>
         <div className="header-meta">
           <DatabaseIndicator />
@@ -129,6 +131,8 @@ function App() {
         {route.page === 'diagnostics' && integrations.data ? (
           <DiagnosticsPage integrations={items} requestedIntegrationId={route.params.get('integration')} />
         ) : null}
+        {route.page === 'support' ? <SupportCasesPage integrations={items} /> : null}
+        {route.page === 'audit' ? <AuditPage /> : null}
       </main>
     </div>
   )

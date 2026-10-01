@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.integration import IntegrationORM
-from app.models.integration import IntegrationCreate, IntegrationStatus
+from app.models.integration import IntegrationCreate, IntegrationStatus, IntegrationUpdate
 
 
 class IntegrationRepository:
@@ -32,6 +32,14 @@ class IntegrationRepository:
             name=payload.name,
             provider=payload.provider.value,
             status=IntegrationStatus.NOT_CONNECTED.value,
+            environment=payload.environment.value,
+            owner_team=payload.owner_team,
+            criticality=payload.criticality.value if payload.criticality else None,
+            support_tier=payload.support_tier.value if payload.support_tier else None,
+            runbook_url=payload.runbook_url,
+            escalation_contact=payload.escalation_contact,
+            go_live_date=payload.go_live_date,
+            expected_traffic=payload.expected_traffic,
             created_at=datetime.now(timezone.utc),
             last_checked_at=None,
         )
@@ -39,6 +47,29 @@ class IntegrationRepository:
         session.commit()
         session.refresh(record)
         return record
+
+    def update_metadata(
+        self,
+        session: Session,
+        integration: IntegrationORM,
+        payload: IntegrationUpdate,
+        *,
+        commit: bool = True,
+    ) -> IntegrationORM:
+        """Update configuration/support metadata fields (not observed health)."""
+        data = payload.model_dump(exclude_unset=True)
+        for field, value in data.items():
+            if hasattr(value, "value"):
+                setattr(integration, field, value.value)
+            else:
+                setattr(integration, field, value)
+        session.add(integration)
+        if commit:
+            session.commit()
+            session.refresh(integration)
+        else:
+            session.flush()
+        return integration
 
     def find_seed_by_name_and_provider(
         self,

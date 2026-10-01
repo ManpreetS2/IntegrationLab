@@ -28,6 +28,7 @@ class DiagnosticRunORM(Base):
     # running | pass | warning | fail | unknown
     overall_status: Mapped[str] = mapped_column(String(32), nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    correlation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
 
 
 class DiagnosticCheckORM(Base):

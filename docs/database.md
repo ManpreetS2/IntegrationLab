@@ -1,24 +1,33 @@
 # Database Notes
 
 PostgreSQL stores integrations, OAuth artifacts, provider request logs, Failure
-Lab runs, Stripe webhook events with their processing history, and persisted
-diagnostic runs with their check results.
+Lab runs, Stripe webhook events with their processing history, persisted
+diagnostic runs, and the support-operations foundation (cases, notes, evidence
+pins, history, operator audit). Integration operational metadata (environment,
+owner, criticality, …) lives on `integrations` as nullable columns — see
+[support-operations.md](support-operations.md) and migration `006`.
 
 ## ER overview
 
 ```text
-integrations
+integrations  (+ environment / owner_team / criticality / …)
   │
   ├── oauth_credentials
   ├── oauth_sessions
   ├── github_profiles
-  ├── provider_request_logs   (outbound: real + simulated)
+  ├── provider_request_logs   (outbound: real + simulated; optional correlation_id)
   ├── failure_lab_runs
   ├── webhook_events          (inbound)
   │     ├── webhook_processing_attempts
   │     └── webhook_effects
-  └── diagnostic_runs         (operator-triggered)
-        └── diagnostic_checks
+  ├── diagnostic_runs         (operator-triggered)
+  │     └── diagnostic_checks
+  └── support_cases
+        ├── support_case_history
+        ├── support_case_notes
+        └── support_case_evidence   (refs to durable evidence)
+
+operator_audit_events  (append-only; optional integration/case/correlation)
 ```
 
 ```mermaid

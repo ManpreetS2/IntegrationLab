@@ -112,7 +112,24 @@ frontend SHA; **do not** auto-downgrade the database — fix forward.
 Centralized container logs for migrations and runtime errors. Retention is
 capped (14 days) for cost. Secret hygiene matters more because logs persist.
 
+### Why Support Cases instead of more log rows?
+An investigation needs lifecycle, severity, ownership context, pinned evidence,
+and notes — not another append-only failure feed. Cases sit above evidence.
+
+### Why a derived timeline?
+Avoid copying every source row into a giant timeline table. Aggregate durable
+case history, notes, and pinned evidence references chronologically.
+
+### Why UUID correlation before OpenTelemetry?
+One operator action should link writes (audit, diagnostic run, pin) without
+adopting Jaeger/Tempo. ContextVar + UUID keeps it testable and secret-safe.
+
+### Why allowlisted audit metadata?
+Audit is for ACTIONS. Allowlists prevent tokens, Authorization headers, and raw
+webhook bodies from landing in an operator-readable trail.
+
 ### What remains missing?
 Real GitHub OAuth verification, real Stripe CLI through CloudFront, automated
 webhook worker, alerts, remote state bootstrap as default, custom domain/ACM,
-and actual `terraform apply` until the user accepts cost.
+and actual `terraform apply` until the user accepts cost. Support Phase 2
+(Stripe recon, provider status, batch recovery, SLOs) is intentionally later.
