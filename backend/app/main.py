@@ -17,6 +17,7 @@ from app.api import (
     stripe_webhooks,
 )
 from app.core.config import get_settings
+from app.core.operator_auth import OperatorAuthMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,11 +30,12 @@ app = FastAPI(
     title="IntegrationLab",
     description=(
         "Partner integration reliability console (GitHub OAuth, Failure Lab, Stripe webhooks, "
-        "reliability dashboard, guided diagnostics)"
+        "reliability dashboard, guided diagnostics, AWS deployment)"
     ),
-    version="0.6.0",
+    version="0.8.0",
 )
 
+app.add_middleware(OperatorAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

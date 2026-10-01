@@ -1,100 +1,169 @@
 # IntegrationLab
 
 IntegrationLab is a partner-integration reliability console for connecting,
-monitoring, debugging, and recovering third-party API integrations.
+monitoring, debugging, and recovering third-party API and webhook integrations.
 
-## Current milestone: Reliability Dashboard + Guided Diagnostics
+**Problem:** third-party integrations fail in messy, ambiguous ways — expired
+tokens, flaky networks, at-least-once webhooks, retries that look like
+duplicates, and dashboards that invent uptime instead of showing evidence.
 
-Working pieces:
+**Solution:** IntegrationLab gives engineers durable event handling,
+observability from real stored evidence, deterministic health and diagnostics,
+and an operator recovery workflow — protected by a runtime single-operator
+access gate and packaged with CI plus an AWS deployment architecture suitable
+for internship interviews.
 
-- React + TypeScript operator console, with hash-routed pages: Overview,
-  Integrations, Requests, Webhooks, Failures, Diagnostics
-- FastAPI + PostgreSQL + SQLAlchemy + Alembic
-- GitHub OAuth (state + PKCE + encrypted tokens)
-- Provider request logging (outbound)
-- Failure Lab: a sandboxed scenario simulator with deterministic diagnosis
-- Stripe webhooks:
-  - signature verification on the exact raw body;
-  - durable receipt;
-  - dedupe and idempotent effects;
-  - 1s/2s/4s retries;
-  - a failed queue with manual retry and dismiss.
-- **Reliability dashboard**:
-  - Deterministic health per integration: `healthy`, `degraded`, `failed`,
-    `unknown`, or `not_configured`.
-  - Health is derived only from real stored evidence.
-  - Separate database health.
-  - A unified recent-failures feed; simulations are opt-in and labelled.
-  - Request metrics: error rate and p95 latency.
-- **Guided diagnostics**:
-  - Operator-triggered GitHub and Stripe checks, each with evidence and a
-    recommendation.
-  - Results are persisted as runs with ordered checks and a history.
+| Reader | Time | What to look at |
+|--------|------|-----------------|
+| Recruiter | 20s | This README intro + Features |
+| Engineer | 2 min | Architecture + Reliability + Security |
+| Interviewer | 10 min | Case study, ADRs, demo script, live console |
+
+## Why I built it
+
+Partner integrations are where backend engineering meets customer impact. I
+wanted a project that proves I can:
+
+- design idempotent webhook intake and bounded retries
+- separate **evidence** from **conclusions** in a reliability model
+- keep secrets out of logs, images, and Terraform state
+- ship CI that blocks bad PRs and CD that migrates before deploy
+- explain cost and security tradeoffs in a real AWS topology
 
 ## Architecture
 
-Reliability (passive; reads PostgreSQL only):
+Local / app:
 
 ```text
-Evidence sources
-  GitHub request logs (real)
-  Stripe webhook processing
-  Failure Lab (labelled, excluded from health)
-  Diagnostic runs
-    → Reliability evaluator (deterministic rules)
-    → Overview
+Browser → React console → FastAPI → PostgreSQL
+                           ├─ GitHub OAuth + request logs
+                           ├─ Failure Lab (simulated)
+                           └─ Stripe webhooks (verify → store → process → retry)
 ```
 
-Active diagnostics:
+AWS (Terraform; apply is user-controlled):
 
 ```text
-Operator → Run diagnostics → provider-specific checks → evidence
-         → recommendations → persisted run
+CloudFront (HTTPS)
+  ├── S3 frontend (private, OAC)
+  └── ALB → ECS Fargate → RDS (private)
+                ↑ Secrets Manager
+GitHub Actions → OIDC → ECR / ECS / S3 / CloudFront
 ```
 
-Loading the dashboard never calls a provider. Only an explicit diagnostic run
-does: a single real GitHub `GET /user`, logged as a real request. Stripe
-diagnostics use stored webhook evidence and need no Stripe API key.
+Reliability dashboard loads **do not** call providers. Guided diagnostics may
+probe GitHub when an operator asks. Details: [docs/architecture.md](docs/architecture.md).
 
-Outbound (real):
+## Features
 
-```text
-GitHub → ProviderHttpResult → request log (real)
-```
+- GitHub OAuth (state + PKCE + encrypted tokens)
+- Provider request observability (real vs simulated)
+- Failure Lab with deterministic diagnosis
+- Stripe webhooks: signature verification, dedupe, idempotent effects, 1s/2s/4s retries, failed queue
+- Reliability overview + failures feed + request metrics (p95)
+- Guided diagnostics with persisted runs/checks
+- Production-mode single-operator Bearer gate (runtime key; never baked into Vite)
+- Production Docker image + full local compose stack
+- GitHub Actions CI (tests, lint/build, Docker, Terraform validate)
+- Manual AWS deploy workflow (OIDC, migrate-before-deploy, smoke tests)
 
-Outbound (Failure Lab):
+## Reliability engineering
 
-```text
-Simulator → ProviderHttpResult → request log (simulated) → diagnosis → failure run
-```
+Health states: `healthy` / `degraded` / `failed` / `unknown` / `not_configured`.
 
-Inbound (Stripe):
+- Health ≠ connection status
+- Missing evidence → `unknown` (never fake healthy)
+- Simulations excluded from live health
+- Database outage → 503 "Database unavailable", not "every provider failed"
 
-```text
-Stripe → raw body → signature check → dedupe → webhook_events → 200
-webhook_events → processor → handler → effect (once) → processed
-                                  └─ retryable failure → 1s/2s/4s → failed queue
-```
+See [docs/reliability.md](docs/reliability.md) and [docs/diagnostics.md](docs/diagnostics.md).
 
-Simulated failures **do not** affect real provider connection state. Inbound
-webhooks are stored in `webhook_events`, not in the outbound request log.
+## Security
 
-See:
+- Fernet-encrypted OAuth tokens at rest
+- Stripe signature verification on the exact raw body
+- Secrets Manager for RDS + provider secrets in AWS
+- GitHub Actions → AWS via **OIDC** (no static access keys)
+- Production refuses to boot without a 24+ character operator key
+- Operator key stays in Secrets Manager/server config and browser sessionStorage, not the bundle
+- Diagnostics/reliability responses tested for secret leakage
+- Production image must not contain `.env` or Terraform state
 
-- [docs/reliability.md](docs/reliability.md)
-- [docs/diagnostics.md](docs/diagnostics.md)
-- [docs/stripe-webhooks.md](docs/stripe-webhooks.md)
-- [docs/failure-lab.md](docs/failure-lab.md)
-- [docs/architecture.md](docs/architecture.md)
-- [docs/database.md](docs/database.md)
-- [docs/github-oauth.md](docs/github-oauth.md)
+## Failure Lab
 
-## Quick start
+Sandboxed scenarios (401/403/429/500/timeout/…) that write **simulated** request
+logs and a diagnosis without mutating real connection health.
+
+## GitHub OAuth
+
+Connect flow with state + PKCE, encrypted credential storage, connection check,
+and guided diagnostics that can issue one real `GET /user` when requested.
+
+## Stripe webhooks
+
+Verify → durable store → 200 → process → bounded retry → failed queue → manual
+retry with effect-level idempotency. Duplicates are expected under at-least-once
+delivery and are not treated as automatic errors.
+
+## Dashboard / diagnostics
+
+Hash-routed console: Overview, Integrations, Requests, Webhooks, Failures,
+Diagnostics. Badges always include text. Optional 60s overview auto-refresh.
+
+## Testing
 
 ```bash
-# DB
-docker compose up -d postgres   # or local Postgres matching DATABASE_URL
+cd backend && source .venv/bin/activate && pytest
+cd frontend && npm run lint && npm run build
+```
 
+CI also builds both Docker images, validates Terraform, and boots the complete
+Compose stack. The `full-stack-smoke` job proves migrations, production-mode
+operator auth, an authenticated write, Failure Lab persistence, and reliability
+aggregation work together.
+
+```bash
+make full-verify
+```
+
+See [docs/verification.md](docs/verification.md) for the claim → evidence matrix.
+
+## CI/CD
+
+- **CI** on every PR/`main` push: backend tests (Postgres 18 + `_test` guard),
+  frontend quality, both container builds, assembled-stack smoke, Terraform fmt/validate
+- **CD** is **manual** (`workflow_dispatch`) against GitHub Environment
+  `production`: SHA image → migration task → ECS → S3 → CloudFront → smoke tests
+
+See [docs/ci-cd.md](docs/ci-cd.md).
+
+## AWS deployment architecture
+
+Terraform under `infra/terraform` defines VPC, ALB, ECS/Fargate, ECR, RDS,
+Secrets Manager, S3, CloudFront, CloudWatch, and GitHub OIDC.
+
+Cost-conscious defaults: no NAT Gateway, single-AZ RDS, one task, short log
+retention, `desired_count = 0` until first deploy.
+
+**AWS INFRASTRUCTURE IS NOT AUTO-APPLIED.** You must run `terraform apply`
+yourself and accept AWS cost. Guide: [docs/aws-deployment.md](docs/aws-deployment.md).
+
+## Incident case study
+
+Hypothetical financial-services webhook processing incident — delivery OK,
+processing failed, bounded retries, failed queue, recovery with idempotent
+effects. Interview deck + demo script included.
+
+- [docs/customer-case-study.md](docs/customer-case-study.md)
+- [docs/customer-case-study-deck.md](docs/customer-case-study-deck.md)
+- [docs/demo-script.md](docs/demo-script.md)
+
+## Local setup
+
+### Simple developer workflow (recommended day-to-day)
+
+```bash
+docker compose up -d postgres   # or local Postgres matching DATABASE_URL
 cp .env.example backend/.env
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
@@ -110,55 +179,109 @@ npm install
 npm run dev
 ```
 
-### Stripe webhooks locally
+Console: `http://localhost:5173/#/overview`
 
-Set `STRIPE_WEBHOOK_SECRET` in `backend/.env`; the app boots without it, but the
-webhook endpoint returns 503. With the Stripe CLI:
-
-```bash
-stripe listen --forward-to localhost:8000/webhooks/stripe/<stripe-integration-id>
-stripe trigger payment_intent.succeeded
-cd backend && python -m app.scripts.process_webhooks
-```
-
-Details and interview notes: [docs/stripe-webhooks.md](docs/stripe-webhooks.md).
-
-## Testing
+### Full container stack (production-like local)
 
 ```bash
-cd backend && source .venv/bin/activate && pytest
-cd frontend && npm run lint && npm run build
+docker compose -f docker-compose.full.yml up --build
+# Ordering: postgres healthy → alembic upgrade head (one-shot) → backend → frontend
+# UI http://localhost:8080  API http://localhost:8000
 ```
 
-## Current features
+The production backend image does **not** migrate on every boot. Compose runs a
+one-shot `migrate` service (`alembic upgrade head`) that must complete
+successfully before the API container starts — the same pattern as the ECS
+one-off migration task.
 
-- PostgreSQL persistence
-- GitHub OAuth + encrypted tokens + connection checks
-- Provider request observability
-- Failure Lab scenarios (401/403/404/429/500/timeout/malformed JSON/transport)
-- Deterministic diagnosis + retryability classification
-- Stripe webhooks:
-  - `payment_intent.succeeded`, `payment_intent.payment_failed`, and `charge.refunded` are handled.
-  - Unknown events are safely ignored.
-  - Processing retries, a failed queue, and manual retry/dismiss.
-- Reliability overview, per-integration health detail, failures feed, and
-  request metrics (`/api/reliability/*`)
-- Guided diagnostics with persisted history (`/api/diagnostics/*`)
+Compose runs in production mode, so the operator gate is enabled. The local
+default key is `local-demo-operator-key-change-me`; override it with
+`OPERATOR_API_KEY`.
 
-The console opens at `http://localhost:5173/#/overview`.
+For an interview-ready deterministic dataset:
+
+```bash
+make demo
+```
+
+This populates explicitly simulated Failure Lab evidence and diagnostics without
+pretending that GitHub OAuth or Stripe delivery was externally verified.
+
+## Screenshots
+
+_Placeholder — add Overview / Failures / Diagnostics / AWS diagram screenshots
+here before portfolio publication._
+
+## Technical decisions
+
+Short ADRs live in [docs/adr/](docs/adr/):
+
+- Sync SQLAlchemy + careful async Session boundary
+- GitHub OAuth App (not GitHub App)
+- PostgreSQL as the retry queue
+- CloudFront single origin for UI + API
+- Public Fargate without NAT for portfolio cost
+
+## Tradeoffs
+
+| Choice | Gain | Cost |
+|--------|------|------|
+| No NAT | Lower AWS bill | Tasks use public IPs (SG-restricted inbound) |
+| Single-AZ RDS | Lower cost | No Multi-AZ HA |
+| Manual CD | No surprise spend | Not continuous delivery yet |
+| Operator webhook tick | Simple, explicit | Not a continuous worker |
+| Hash routing | Simple SPA deploy | Deep-link UX differs from path routing |
+
+## Known limitations
+
+- Real GitHub OAuth and Stripe CLI flows not verified in this environment
+- AWS stack written and validated statically; apply is user-controlled
+- No continuous webhook worker / EventBridge scheduler by default
+- No alerts, multi-user auth, or data retention policy
+- Single-operator bearer access only; no user identity/RBAC/multi-tenancy
+- CloudFront→ALB uses HTTP in the portfolio design (viewer HTTPS only); real sensitive use should add origin TLS
+- No WAF/application rate limiter in the default stack
+
+## What I learned
+
+- Reliability dashboards must separate evidence from conclusions
+- Webhook systems need durable receipt before business processing
+- Migrations belong in deploy, not on every container boot
+- OIDC beats long-lived cloud keys for GitHub Actions
+- Cost-aware architecture is part of engineering judgment
+
+## Docs index
+
+| Doc | Topic |
+|-----|-------|
+| [architecture.md](docs/architecture.md) | System + AWS diagram |
+| [reliability.md](docs/reliability.md) | Health model |
+| [diagnostics.md](docs/diagnostics.md) | Guided checks |
+| [stripe-webhooks.md](docs/stripe-webhooks.md) | Webhook engine |
+| [aws-deployment.md](docs/aws-deployment.md) | Provision + deploy |
+| [aws-costs.md](docs/aws-costs.md) | Cost drivers |
+| [deployment.md](docs/deployment.md) | Migrate / rollback |
+| [ci-cd.md](docs/ci-cd.md) | Pipelines |
+| [verification.md](docs/verification.md) | Claim → automated evidence matrix |
+| [threat-model.md](docs/threat-model.md) | Trust boundaries, controls, residual risk |
+| [customer-case-study.md](docs/customer-case-study.md) | Incident exercise |
+| [interview-questions.md](docs/interview-questions.md) | Q&A |
 
 ## Current non-features
 
-- AWS
-- Continuous background monitoring (health is computed when requested)
-- Alerts
+- AWS auto-apply / always-on expensive HA defaults
 - AI diagnosis
-- Multi-user auth (operator endpoints are local prototype controls)
-- Real payment mutations / Stripe API writes
-- Redis / Celery / queues (the webhook worker is a CLI tick)
-- Uptime, SLA, or incident statistics
-- A data retention policy (evidence tables grow until pruned manually)
+- Multi-user identity / RBAC (single-operator bearer gate only)
+- Redis / Celery / EKS / Lambda rewrite
 
-## Next milestone
+## Completion status
 
-**CI + production deployment + incident case study**
+The repository-side engineering milestone is complete when PR CI is green:
+application behavior, Docker packaging, assembled-stack smoke, Terraform
+validation, operator access control, deployment workflow, incident exercise,
+verification matrix, and threat model are versioned together.
+
+The remaining acceptance work requires user-controlled external systems rather
+than more speculative code: real AWS apply, real GitHub OAuth, real Stripe CLI
+delivery, and final screenshots. Those remain explicitly unverified until they
+are actually run.

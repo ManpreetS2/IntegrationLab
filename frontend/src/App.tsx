@@ -75,7 +75,7 @@ function App() {
         </div>
         <div className="header-meta">
           <DatabaseIndicator />
-          <p className="muted api-url">API: {API_URL}</p>
+          <p className="muted api-url">API: {API_URL || 'same origin'}</p>
         </div>
       </header>
 

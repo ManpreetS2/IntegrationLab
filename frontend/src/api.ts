@@ -1,5 +1,6 @@
 /** Thin HTTP helpers for talking to the FastAPI backend. */
 
+import { getOperatorApiKey } from './auth'
 import type {
   DiagnosticRun,
   DiagnosticRunListItem,
@@ -27,7 +28,35 @@ import type {
   WebhookSummary,
 } from './types'
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+export interface OperatorAuthStatus {
+  required: boolean
+}
+
+/**
+ * API base URL.
+ *
+ * - Local Vite: unset → http://localhost:8000
+ * - Production CloudFront: VITE_API_URL="" → same-origin relative paths
+ * - Explicit override: any non-null VITE_API_URL value wins (including "")
+ */
+function resolveApiUrl(): string {
+  const configured = import.meta.env.VITE_API_URL
+  if (configured !== undefined && configured !== null) {
+    return String(configured)
+  }
+  return 'http://localhost:8000'
+}
+
+const API_URL = resolveApiUrl()
+
+/** Absolute base for display / copy-paste (never empty). */
+export function apiOrigin(): string {
+  if (API_URL) return API_URL
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin
+  }
+  return ''
+}
 
 /** Non-2xx response from the API. `message` keeps the raw detail text for existing callers. */
 export class ApiError extends Error {
@@ -50,13 +79,18 @@ function toQuery(params: Record<string, string | number | boolean | undefined | 
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  // Default Content-Type first, then merge caller headers so they can
-  // intentionally override without wiping the helper defaults via spread order.
   const headers = new Headers({ 'Content-Type': 'application/json' })
   if (init?.headers) {
     new Headers(init.headers).forEach((value, key) => {
       headers.set(key, value)
     })
+  }
+
+  // Never bake the operator key into frontend assets. It is entered at runtime,
+  // stored in sessionStorage, and attached only to operator /api requests.
+  if (path.startsWith('/api/')) {
+    const operatorKey = getOperatorApiKey()
+    if (operatorKey) headers.set('Authorization', `Bearer ${operatorKey}`)
   }
 
   const response = await fetch(`${API_URL}${path}`, {
@@ -70,6 +104,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>
+}
+
+export function getOperatorAuthStatus(): Promise<OperatorAuthStatus> {
+  return request<OperatorAuthStatus>('/auth/operator')
+}
+
+export function verifyOperatorAccess(): Promise<{ authorized: boolean }> {
+  return request<{ authorized: boolean }>('/api/auth/check')
 }
 
 export function getHealth(): Promise<HealthResponse> {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  API_URL,
+  apiOrigin,
   dismissWebhookEvent,
   getWebhookEvent,
   getWebhookSummary,
@@ -182,7 +182,7 @@ function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
         <div className="webhook-endpoints">
           {stripeIntegrations.map((item) => (
             <p key={item.id} className="muted">
-              {item.name} endpoint: <code>{`${API_URL}/webhooks/stripe/${item.id}`}</code>
+              {item.name} endpoint: <code>{`${apiOrigin()}/webhooks/stripe/${item.id}`}</code>
             </p>
           ))}
         </div>

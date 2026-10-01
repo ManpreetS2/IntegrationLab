@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { API_URL, getReliabilityOverview } from '../api'
+import { apiOrigin, getReliabilityOverview } from '../api'
 import CreateIntegrationForm from '../components/CreateIntegrationForm'
 import GitHubConnectionPanel from '../components/GitHubConnectionPanel'
 import IntegrationsTable from '../components/IntegrationsTable'
@@ -88,7 +88,7 @@ function IntegrationsPage({ integrations, onCreate }: IntegrationsPageProps) {
                   <article key={integration.id} className="github-card">
                     <h3>{integration.name}</h3>
                     <p className="webhook-endpoints">
-                      Endpoint: <code>{`${API_URL}/webhooks/stripe/${integration.id}`}</code>
+                      Endpoint: <code>{`${apiOrigin()}/webhooks/stripe/${integration.id}`}</code>
                     </p>
                     <p>
                       Webhook verification: <strong>{verificationText(integration.id)}</strong>

@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars for local plans (do not commit terraform.tfvars).
+# Safe example values only — no account IDs, passwords, or client secrets.
+
+aws_region  = "us-west-2"
+environment = "dev"
+
+# Keep at 0 until the first real container image is pushed and migrated.
+ecs_desired_count = 0
+
+# Portfolio/dev defaults — see docs/aws-costs.md
+db_instance_class          = "db.t4g.micro"
+db_engine_version          = "18.6"
+db_skip_final_snapshot     = true
+restrict_alb_to_cloudfront = true
+
+github_repository         = "ManpreetS2/IntegrationLab"
+github_owner_id           = "111776138"
+github_repository_id      = "1391676369"
+github_deploy_environment = "production"
+
+# Immutable OIDC subject for environment:production (repo created after 2026-07-15).
+# Verify with: gh api repos/ManpreetS2/IntegrationLab/actions/oidc/customization/sub
+github_oidc_subjects = [
+  "repo:ManpreetS2@111776138/IntegrationLab@1391676369:environment:production",
+]
