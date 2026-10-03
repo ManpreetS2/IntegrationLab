@@ -77,7 +77,7 @@ No OpenTelemetry / Jaeger / Tempo yet.
 Append-only `operator_audit_events` for meaningful ACTIONS:
 
 - integration create/update
-- GitHub connect started (`actor_type=browser_handoff` — public OAuth handoff)
+- GitHub connect requested (`actor_type=browser_handoff` — public OAuth handoff)
 - Failure Lab run, diagnostic run
 - webhook process / process-due / retry / dismiss
 - support case create/status/severity, notes, evidence pin/unpin
@@ -98,8 +98,8 @@ Rules:
 | Failure Lab run | Simulated request log + run + audit in the **success** commit |
 | Diagnostics | In-flight "running" row commits first (lock). Completion checks + audit share the **final** commit |
 | Webhook retry/dismiss | Status change + audit in one commit |
-| Webhook process / process-due | Processor commits attempts; route then writes audit (correlation already bound for attempts) |
-| GitHub connect | Best-effort audit (`browser_handoff`); audit failure must not block OAuth redirect |
+| Webhook process / process-due | **Intent audit committed first** (`*_requested`); processor keeps its own multi-transaction design; attempts inherit ContextVar correlation |
+| GitHub connect | Best-effort `github_connect_requested` when integration exists (`browser_handoff`); audit failure must not block OAuth redirect |
 
 ## Evidence pinning
 

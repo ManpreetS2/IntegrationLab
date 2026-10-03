@@ -11,6 +11,7 @@ from starlette.responses import RedirectResponse
 from app.core.correlation import correlation_scope, parse_correlation_id, short_entity_id
 from app.core.database import get_db
 from app.models.github import GitHubCheckResponse, GitHubConnectionResponse
+from app.repositories.integrations import integration_repository
 from app.services.audit import audit_service
 from app.services.github_oauth import github_oauth_service
 
@@ -28,29 +29,35 @@ def connect_github(
     """Start GitHub OAuth (browser navigation; returns a redirect).
 
     Intentionally public for browser handoff. Audit uses actor_type
-    ``browser_handoff`` — not authenticated per-user identity. Audit failure
-    must not block the OAuth redirect.
+    ``browser_handoff`` — not authenticated per-user identity.
+
+    Action is ``github_connect_requested`` (intent at the handoff boundary).
+    Missing integrations are not audited. Audit failure must not block OAuth.
     """
     with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
-        try:
-            audit_service.record(
-                db,
-                action="github_connect_started",
-                target_type="integration",
-                target_id=integration_id,
-                integration_id=integration_id,
-                correlation_id=correlation_id,
-                actor_type="browser_handoff",
-                safe_summary=(
-                    f"GitHub OAuth connect started for integration "
-                    f"{short_entity_id(integration_id)}"
-                ),
-                metadata={"provider": "github"},
-                commit=True,
-            )
-        except Exception:  # noqa: BLE001 — never weaken the public OAuth handoff
-            logger.exception("Failed to audit GitHub connect handoff")
-            db.rollback()
+        integration = integration_repository.get_by_id(db, integration_id)
+        # Only audit a real GitHub integration handoff. Missing/wrong-provider
+        # targets must not leave a misleading "requested" success trail.
+        if integration is not None and integration.provider == "github":
+            try:
+                audit_service.record(
+                    db,
+                    action="github_connect_requested",
+                    target_type="integration",
+                    target_id=integration_id,
+                    integration_id=integration_id,
+                    correlation_id=correlation_id,
+                    actor_type="browser_handoff",
+                    safe_summary=(
+                        f"GitHub OAuth connect requested for integration "
+                        f"{short_entity_id(integration_id)}"
+                    ),
+                    metadata={"provider": "github"},
+                    commit=True,
+                )
+            except Exception:  # noqa: BLE001 — never weaken the public OAuth handoff
+                logger.exception("Failed to audit GitHub connect handoff")
+                db.rollback()
         return github_oauth_service.start_connect(db, integration_id)
 
 

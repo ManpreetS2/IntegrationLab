@@ -580,3 +580,115 @@ def test_webhook_retry_correlation_flows_to_attempt(client, stripe_integration_i
     assert any(row["action"] == "webhook_retry_requested" for row in audit)
     assert any(row["action"] == "webhook_process_requested" for row in audit)
     assert all(row["correlation_id"] == correlation for row in audit)
+
+
+def test_webhook_process_skips_processor_when_pre_audit_fails(
+    client, stripe_integration_id, monkeypatch
+):
+    event_id = _webhook_event_id(client, stripe_integration_id, event_id="evt_pre_audit_fail")
+    called = {"process_now": False, "process_due": False}
+
+    def boom(*_args, **_kwargs):
+        raise SQLAlchemyError("simulated audit failure")
+
+    def spy_process_now(*_args, **_kwargs):
+        called["process_now"] = True
+        raise AssertionError("processor must not run when pre-audit fails")
+
+    def spy_process_due(*_args, **_kwargs):
+        called["process_due"] = True
+        raise AssertionError("processor must not run when pre-audit fails")
+
+    monkeypatch.setattr("app.api.stripe_webhooks.audit_service.record", boom)
+    monkeypatch.setattr("app.api.stripe_webhooks.webhook_event_service.process_now", spy_process_now)
+    monkeypatch.setattr("app.api.stripe_webhooks.stripe_webhook_processor.process_due", spy_process_due)
+
+    process = client.post(f"/api/webhooks/stripe/events/{event_id}/process")
+    assert process.status_code == 503
+    assert called["process_now"] is False
+
+    due = client.post("/api/webhooks/stripe/process-due")
+    assert due.status_code == 503
+    assert called["process_due"] is False
+
+    # Event remains pending — processor never claimed it.
+    detail = client.get(f"/api/webhooks/stripe/events/{event_id}").json()
+    assert detail["processing_status"] == "pending"
+    assert detail["attempts"] == []
+
+
+def test_process_due_request_audit_exists_when_zero_due(client):
+    correlation = str(uuid4())
+    response = client.post(
+        "/api/webhooks/stripe/process-due",
+        headers={"X-Correlation-ID": correlation},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "processed": 0,
+        "retry_scheduled": 0,
+        "failed": 0,
+        "ignored": 0,
+        "skipped": 0,
+    }
+    audit = client.get("/api/audit-events", params={"correlation_id": correlation}).json()
+    assert len(audit) == 1
+    assert audit[0]["action"] == "webhook_process_due_requested"
+    assert audit[0]["correlation_id"] == correlation
+    assert audit[0]["metadata"] == {"limit": 25, "provider": "stripe"}
+    assert "processed" not in (audit[0]["metadata"] or {})
+
+
+def test_github_connect_requested_audit_semantics(
+    client, github_integration_id, stripe_integration_id, db_session
+):
+    before = db_session.query(OperatorAuditEventORM).count()
+    correlation = str(uuid4())
+    response = client.get(
+        f"/api/integrations/{github_integration_id}/github/connect",
+        headers={"X-Correlation-ID": correlation},
+        follow_redirects=False,
+    )
+    assert response.status_code in {302, 307}
+    assert "github.com" in response.headers.get("location", "")
+
+    audit = client.get("/api/audit-events", params={"correlation_id": correlation}).json()
+    assert len(audit) == 1
+    row = audit[0]
+    assert row["action"] == "github_connect_requested"
+    assert row["actor_type"] == "browser_handoff"
+    assert row["correlation_id"] == correlation
+    assert row["integration_id"] == github_integration_id
+    assert row["metadata"] == {"provider": "github"}
+    blob = str(row).lower()
+    for forbidden in (
+        "code_verifier",
+        "code_challenge",
+        "access_token",
+        "client_secret",
+        "gho_",
+        "authorization_code",
+    ):
+        assert forbidden not in blob
+
+    # Missing integration → no audit row.
+    missing = client.get(
+        "/api/integrations/00000000-0000-0000-0000-000000000099/github/connect",
+        follow_redirects=False,
+    )
+    assert missing.status_code == 404
+
+    # Wrong provider → rejected, no GitHub connect audit.
+    wrong = client.get(
+        f"/api/integrations/{stripe_integration_id}/github/connect",
+        follow_redirects=False,
+    )
+    assert wrong.status_code == 400
+    db_session.expire_all()
+    after_invalid = db_session.query(OperatorAuditEventORM).count()
+    assert after_invalid == before + 1
+
+    # Ordinary GET connection metadata does not audit.
+    client.get(f"/api/integrations/{github_integration_id}/github")
+    db_session.expire_all()
+    assert db_session.query(OperatorAuditEventORM).count() == after_invalid

@@ -51,7 +51,7 @@ GitHub Actions
 | Cross-integration evidence pinned to wrong case | Pin validation requires evidence to belong to the case's integration |
 | Oversized support note / XSS in console | Server length limits; React text escaping (no raw HTML injection) |
 | Unauthenticated support/audit APIs | Same production Bearer gate as other `/api/*` operator routes |
-| GitHub connect audit over-claims identity | Connect remains public; audit uses `actor_type=browser_handoff` and never stores OAuth secrets |
+| GitHub connect audit over-claims identity | Connect remains public; audit is `github_connect_requested` with `actor_type=browser_handoff` and never stores OAuth secrets |
 | Free-form title/name copied into audit | Audit summaries/metadata are structural only (ids/enums/case numbers) |
 | Secret/config file baked into image | Docker ignore rules + CI image tar scan |
 | RDS exposed to internet | Private DB subnets; RDS SG accepts 5432 only from ECS SG |
