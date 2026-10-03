@@ -14,11 +14,31 @@ export type FailureScenarioId =
   | 'malformed_json'
   | 'transport_error'
 
+export type Environment = 'local' | 'test' | 'staging' | 'production'
+export type CaseSeverity = 'SEV1' | 'SEV2' | 'SEV3' | 'SEV4'
+export type CaseStatus = 'investigating' | 'identified' | 'monitoring' | 'resolved' | 'reopened'
+export type EvidenceType =
+  | 'provider_request'
+  | 'webhook_event'
+  | 'webhook_attempt'
+  | 'diagnostic_run'
+  | 'failure_lab_run'
+  | 'audit_event'
+
 export interface Integration {
   id: string
   name: string
   provider: IntegrationProvider
   status: IntegrationStatus
+  environment: Environment
+  owner_team: string | null
+  criticality: string | null
+  support_tier: string | null
+  runbook_url: string | null
+  escalation_contact: string | null
+  go_live_date: string | null
+  expected_traffic: string | null
+  last_verified_at: string | null
   created_at: string
   last_checked_at: string | null
 }
@@ -26,6 +46,85 @@ export interface Integration {
 export interface IntegrationCreateRequest {
   name: string
   provider: IntegrationProvider
+  environment?: Environment
+}
+
+export interface SupportCase {
+  id: string
+  case_number: string
+  integration_id: string
+  environment: Environment
+  title: string
+  severity: CaseSeverity
+  status: CaseStatus
+  owner: string | null
+  impact_summary: string | null
+  suspected_cause: string | null
+  confirmed_root_cause: string | null
+  mitigation_summary: string | null
+  resolution_summary: string | null
+  correlation_id: string | null
+  opened_at: string
+  acknowledged_at: string | null
+  identified_at: string | null
+  monitoring_at: string | null
+  resolved_at: string | null
+  reopened_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SupportCaseNote {
+  id: string
+  support_case_id: string
+  body: string
+  correlation_id: string | null
+  created_at: string
+}
+
+export interface SupportCaseEvidence {
+  id: string
+  support_case_id: string
+  evidence_type: EvidenceType
+  evidence_id: string
+  safe_label: string
+  is_simulated: boolean
+  correlation_id: string | null
+  pinned_at: string
+}
+
+export interface SupportCaseDetail extends SupportCase {
+  notes: SupportCaseNote[]
+  evidence: SupportCaseEvidence[]
+}
+
+export interface TimelineItem {
+  timestamp: string
+  type: string
+  title: string
+  summary: string
+  source_type: string | null
+  source_id: string | null
+  correlation_id: string | null
+  correlation_short: string | null
+  is_simulated: boolean
+  occurred_at?: string | null
+  pinned_at?: string | null
+}
+
+export interface OperatorAuditEvent {
+  id: string
+  action: string
+  target_type: string
+  target_id: string | null
+  integration_id: string | null
+  support_case_id: string | null
+  correlation_id: string | null
+  actor_type: string
+  outcome: string
+  safe_summary: string
+  metadata: Record<string, unknown> | null
+  created_at: string
 }
 
 export interface HealthResponse {

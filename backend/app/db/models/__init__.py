@@ -12,6 +12,13 @@ from app.db.models.oauth import (
     OAuthSessionORM,
     ProviderRequestLogORM,
 )
+from app.db.models.support import (
+    OperatorAuditEventORM,
+    SupportCaseEvidenceORM,
+    SupportCaseHistoryORM,
+    SupportCaseNoteORM,
+    SupportCaseORM,
+)
 from app.db.models.webhook import (
     WebhookEffectORM,
     WebhookEventORM,
@@ -30,4 +37,9 @@ __all__ = [
     "WebhookEffectORM",
     "DiagnosticRunORM",
     "DiagnosticCheckORM",
+    "SupportCaseORM",
+    "SupportCaseHistoryORM",
+    "SupportCaseNoteORM",
+    "SupportCaseEvidenceORM",
+    "OperatorAuditEventORM",
 ]

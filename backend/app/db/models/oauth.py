@@ -122,3 +122,4 @@ class ProviderRequestLogORM(Base):
     rate_limit_remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_simulated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     scenario: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    correlation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)

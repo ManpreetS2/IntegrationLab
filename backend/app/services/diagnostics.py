@@ -19,8 +19,10 @@ from app.models.diagnostics import (
     DiagnosticRunListItem,
     DiagnosticRunResponse,
 )
+from app.core.correlation import get_correlation_id
 from app.repositories.diagnostics import diagnostic_repository
 from app.services import reliability_rules as rules
+from app.services.audit import audit_service
 from app.services.diagnostic_checks import CheckResult, summarize_checks
 from app.services.github_diagnostics import run_github_checks
 from app.services.stripe_diagnostics import run_stripe_checks
@@ -79,6 +81,8 @@ class DiagnosticsService:
         run = diagnostic_repository.create_run(
             session, integration_id=integration_id, provider=integration.provider, started_at=started
         )
+        # Intentionally commit the in-flight "running" row so concurrent runs can
+        # see the lock. Completion + audit are co-committed below.
         session.commit()
         run_id = run.id
 
@@ -105,6 +109,21 @@ class DiagnosticsService:
         run.overall_status = overall.value
         run.summary = summary
         run.completed_at = max(datetime.now(timezone.utc), started)
+        audit_service.record(
+            session,
+            action="diagnostic_started",
+            target_type="diagnostic_run",
+            target_id=run_id,
+            integration_id=integration_id,
+            correlation_id=get_correlation_id(),
+            safe_summary=f"Diagnostic run completed with status {overall.value}",
+            metadata={
+                "diagnostic_run_id": str(run_id),
+                "outcome": overall.value,
+                "trigger": "manual",
+            },
+            commit=False,
+        )
         session.commit()
         session.expire_all()
         return self.get_run(session, run_id)

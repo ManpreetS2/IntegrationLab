@@ -54,14 +54,23 @@ Open a GitHub card.
 - Show pass/warning/fail/unknown checks and persisted history.
 - Mention GitHub probe is the only optional real provider call.
 
-## 9. AWS architecture (45s)
+## 9. Support case from evidence (45s)
+
+From Failures → **Create Support Case** on a Failure Lab row (or open `/#/support`).
+
+- Show prefilled integration/environment and safe title (no invented root cause).
+- Pin evidence, add a short note, move status investigating → identified.
+- Open timeline: history + note + simulated pin labeled.
+- Mention `/#/audit` for the operator action trail and correlation IDs.
+
+## 10. AWS architecture (45s)
 
 Sketch or open docs diagram:
 
 CloudFront → S3 + ALB → Fargate → RDS; Secrets Manager; GitHub OIDC deploy.
 Mention: Terraform written; apply is user-controlled because of cost.
 
-## 10. Incident case study (60s)
+## 11. Incident case study (60s)
 
 One-minute version of [customer-case-study.md](customer-case-study.md):
 

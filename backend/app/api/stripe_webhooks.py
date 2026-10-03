@@ -7,13 +7,17 @@ Inbound webhooks are stored in webhook_events, not provider_request_logs
 (which records outbound calls we make to providers).
 """
 
+import logging
 from collections.abc import Callable
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.correlation import correlation_scope, parse_correlation_id, short_entity_id
 from app.core.database import SessionLocal, get_db
 from app.models.webhook import (
     ProcessDueResponse,
@@ -23,9 +27,13 @@ from app.models.webhook import (
     WebhookReceiptResponse,
     WebhookSummaryResponse,
 )
+from app.repositories.webhooks import webhook_event_repository
+from app.services.audit import audit_service
 from app.services.stripe_webhooks import stripe_webhook_receiver
 from app.services.webhook_events import webhook_event_service
 from app.services.webhook_processor import stripe_webhook_processor
+
+logger = logging.getLogger(__name__)
 
 public_router = APIRouter(prefix="/webhooks/stripe", tags=["stripe-webhooks"])
 router = APIRouter(prefix="/api/webhooks/stripe", tags=["stripe-webhooks"])
@@ -98,9 +106,34 @@ def list_failed_webhook_events(
 def process_due_webhook_events(
     limit: int = Query(default=25, ge=1, le=50),
     db: Session = Depends(get_db),
+    x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
 ) -> ProcessDueResponse:
-    """Run one bounded processing tick (same code path as the CLI)."""
-    return stripe_webhook_processor.process_due(db, limit=limit)
+    """Run one bounded processing tick (same code path as the CLI).
+
+    Operator INTENT is audited and committed before the processor runs. The
+    processor keeps its own multi-transaction design; attempts inherit the
+    active correlation ContextVar.
+    """
+    with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
+        try:
+            audit_service.record(
+                db,
+                action="webhook_process_due_requested",
+                target_type="webhook_batch",
+                target_id=None,
+                correlation_id=correlation_id,
+                safe_summary=f"Requested processing of due Stripe webhooks (limit={limit})",
+                metadata={"limit": limit, "provider": "stripe"},
+                commit=True,
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception("Failed to audit webhook process-due request")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database temporarily unavailable",
+            ) from None
+        return stripe_webhook_processor.process_due(db, limit=limit)
 
 
 @router.get("/events/{event_id}", response_model=WebhookEventDetail)
@@ -109,18 +142,61 @@ def get_webhook_event(event_id: UUID, db: Session = Depends(get_db)) -> WebhookE
 
 
 @router.post("/events/{event_id}/process", response_model=WebhookEventDetail)
-def process_webhook_event(event_id: UUID, db: Session = Depends(get_db)) -> WebhookEventDetail:
-    """Process one pending/retry-scheduled event now (409 if already processing)."""
-    return webhook_event_service.process_now(db, event_id)
+def process_webhook_event(
+    event_id: UUID,
+    db: Session = Depends(get_db),
+    x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
+) -> WebhookEventDetail:
+    """Process one pending/retry-scheduled event now (409 if already processing).
+
+    Operator INTENT is audited and committed before the processor runs.
+    """
+    with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
+        try:
+            event = webhook_event_repository.get(db, event_id)
+            audit_service.record(
+                db,
+                action="webhook_process_requested",
+                target_type="webhook_event",
+                target_id=event_id,
+                integration_id=event.integration_id if event is not None else None,
+                correlation_id=correlation_id,
+                safe_summary=(
+                    f"Requested processing of Stripe webhook event {short_entity_id(event_id)}"
+                ),
+                metadata={
+                    "webhook_event_id": str(event_id),
+                    "provider": "stripe",
+                },
+                commit=True,
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception("Failed to audit webhook process request")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database temporarily unavailable",
+            ) from None
+        return webhook_event_service.process_now(db, event_id)
 
 
 @router.post("/events/{event_id}/retry", response_model=WebhookEventDetail)
-def retry_webhook_event(event_id: UUID, db: Session = Depends(get_db)) -> WebhookEventDetail:
+def retry_webhook_event(
+    event_id: UUID,
+    db: Session = Depends(get_db),
+    x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
+) -> WebhookEventDetail:
     """Reopen a failed (or dismissed) event with a fresh retry cycle; history kept."""
-    return webhook_event_service.retry(db, event_id)
+    with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
+        return webhook_event_service.retry(db, event_id, correlation_id=correlation_id)
 
 
 @router.post("/events/{event_id}/dismiss", response_model=WebhookEventDetail)
-def dismiss_webhook_event(event_id: UUID, db: Session = Depends(get_db)) -> WebhookEventDetail:
+def dismiss_webhook_event(
+    event_id: UUID,
+    db: Session = Depends(get_db),
+    x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
+) -> WebhookEventDetail:
     """Stop processing an event without deleting its history."""
-    return webhook_event_service.dismiss(db, event_id)
+    with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
+        return webhook_event_service.dismiss(db, event_id, correlation_id=correlation_id)

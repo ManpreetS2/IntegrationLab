@@ -222,9 +222,71 @@ def main() -> int:
             "simulated Failure Lab evidence incorrectly changed live integration health"
         )
 
+    # Support-operations foundation: case ← Failure Lab evidence ← note ← status.
+    _, support_case = request(
+        "POST",
+        "/api/support-cases",
+        payload={
+            "integration_id": integration_id,
+            "title": "CI smoke rate-limit investigation",
+            "severity": "SEV3",
+            "suspected_cause": "GitHub rate limiting observed in Failure Lab",
+            "source_evidence_type": "failure_lab_run",
+            "source_evidence_id": run["id"],
+        },
+        expected={201},
+    )
+    case_id = support_case["id"]
+    if not support_case.get("evidence"):
+        raise SmokeFailure("support case did not pin source Failure Lab evidence")
+    if not support_case["evidence"][0].get("is_simulated"):
+        raise SmokeFailure("Failure Lab evidence pin must remain labeled simulated")
+
+    request(
+        "POST",
+        f"/api/support-cases/{case_id}/notes",
+        payload={"body": "Smoke test note: monitoring simulated rate-limit evidence."},
+        expected={201},
+    )
+    _, moved = request(
+        "PATCH",
+        f"/api/support-cases/{case_id}",
+        payload={"status": "identified"},
+    )
+    if moved.get("status") != "identified":
+        raise SmokeFailure(f"support case status transition failed: {moved}")
+
+    _, timeline = request("GET", f"/api/support-cases/{case_id}/timeline")
+    timeline_types = {item.get("type") for item in timeline}
+    if "case_opened" not in timeline_types or "note" not in timeline_types:
+        raise SmokeFailure(f"support timeline missing expected events: {timeline_types}")
+    if not any(item.get("is_simulated") for item in timeline):
+        raise SmokeFailure("support timeline did not mark simulated evidence")
+
+    _, audit_rows = request(
+        "GET",
+        f"/api/audit-events?support_case_id={case_id}&limit=50",
+    )
+    audit_actions = {row.get("action") for row in audit_rows}
+    if "support_case_created" not in audit_actions:
+        raise SmokeFailure(f"audit trail missing support_case_created: {audit_actions}")
+
+    # Re-check live health was not contaminated by the support workflow.
+    _, overview_after = request("GET", "/api/reliability/overview?window_hours=24")
+    health_after = next(
+        (
+            item
+            for item in overview_after.get("integrations", [])
+            if item.get("integration_id") == integration_id
+        ),
+        None,
+    )
+    if health_after and health_after.get("health") in {"failed", "degraded"}:
+        raise SmokeFailure("support workflow incorrectly changed live integration health")
+
     print(
         "Full-stack smoke passed: frontend + auth gate + migrations + API + "
-        "Failure Lab + reliability aggregation"
+        "Failure Lab + reliability aggregation + support case workflow"
     )
     return 0
 

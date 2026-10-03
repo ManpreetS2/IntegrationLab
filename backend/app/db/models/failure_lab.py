@@ -36,6 +36,7 @@ class FailureLabRunORM(Base):
     evidence_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     recommended_checks: Mapped[str | None] = mapped_column(Text, nullable=True)
     rate_limit_remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    correlation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

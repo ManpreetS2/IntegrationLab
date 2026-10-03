@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { ApiError } from './api'
 
-export type Page = 'overview' | 'integrations' | 'requests' | 'webhooks' | 'failures' | 'diagnostics'
+export type Page =
+  | 'overview'
+  | 'integrations'
+  | 'requests'
+  | 'webhooks'
+  | 'failures'
+  | 'diagnostics'
+  | 'support'
+  | 'audit'
 
 export const PAGES: { id: Page; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -10,6 +18,8 @@ export const PAGES: { id: Page; label: string }[] = [
   { id: 'webhooks', label: 'Webhooks' },
   { id: 'failures', label: 'Failures' },
   { id: 'diagnostics', label: 'Diagnostics' },
+  { id: 'support', label: 'Support Cases' },
+  { id: 'audit', label: 'Audit' },
 ]
 
 const PAGE_IDS = new Set<string>(PAGES.map((page) => page.id))

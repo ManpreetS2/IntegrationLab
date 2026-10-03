@@ -16,6 +16,8 @@ class DiagnosticRepository:
     def create_run(
         self, session: Session, *, integration_id: UUID, provider: str, started_at: datetime
     ) -> DiagnosticRunORM:
+        from app.core.correlation import get_correlation_id
+
         run = DiagnosticRunORM(
             id=uuid4(),
             integration_id=integration_id,
@@ -23,6 +25,7 @@ class DiagnosticRepository:
             trigger="manual",
             started_at=started_at,
             overall_status="running",
+            correlation_id=get_correlation_id(),
         )
         session.add(run)
         session.flush()

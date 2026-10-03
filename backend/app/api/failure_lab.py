@@ -1,10 +1,12 @@
 """Failure Lab API — sandboxed provider failure reproduction."""
 
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
+from app.core.correlation import correlation_scope, parse_correlation_id
 from app.core.database import get_db
 from app.models.failure_lab import (
     FailureLabRunListItem,
@@ -28,9 +30,12 @@ def list_failure_scenarios() -> list[FailureScenarioInfo]:
 def run_failure_scenario(
     payload: FailureLabRunRequest,
     db: Session = Depends(get_db),
+    x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
 ) -> FailureLabRunResponse:
     """Run a sandboxed failure simulation (does not call GitHub or mutate credentials)."""
-    return failure_lab_service.run(db, payload)
+    with correlation_scope(parse_correlation_id(x_correlation_id)):
+        # Audit is recorded inside the service before the success commit.
+        return failure_lab_service.run(db, payload)
 
 
 @router.get("/runs", response_model=list[FailureLabRunListItem])

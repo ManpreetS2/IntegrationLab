@@ -100,7 +100,9 @@ def clean_db(test_engine, TestingSessionLocal) -> Generator[None, None, None]:
     with test_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE diagnostic_checks, diagnostic_runs, "
+                "TRUNCATE TABLE support_case_evidence, support_case_notes, "
+                "support_case_history, operator_audit_events, support_cases, "
+                "diagnostic_checks, diagnostic_runs, "
                 "webhook_effects, webhook_processing_attempts, webhook_events, "
                 "failure_lab_runs, provider_request_logs, github_profiles, "
                 "oauth_credentials, oauth_sessions, integrations "

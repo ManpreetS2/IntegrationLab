@@ -62,6 +62,7 @@ probe GitHub when an operator asks. Details: [docs/architecture.md](docs/archite
 - Stripe webhooks: signature verification, dedupe, idempotent effects, 1s/2s/4s retries, failed queue
 - Reliability overview + failures feed + request metrics (p95)
 - Guided diagnostics with persisted runs/checks
+- Support Cases foundation: lifecycle, severity, evidence pinning, notes, derived timeline, operator audit, correlation IDs
 - Production-mode single-operator Bearer gate (runtime key; never baked into Vite)
 - Production Docker image + full local compose stack
 - GitHub Actions CI (tests, lint/build, Docker, Terraform validate)
@@ -76,7 +77,8 @@ Health states: `healthy` / `degraded` / `failed` / `unknown` / `not_configured`.
 - Simulations excluded from live health
 - Database outage → 503 "Database unavailable", not "every provider failed"
 
-See [docs/reliability.md](docs/reliability.md) and [docs/diagnostics.md](docs/diagnostics.md).
+See [docs/reliability.md](docs/reliability.md), [docs/diagnostics.md](docs/diagnostics.md), and
+[docs/support-operations.md](docs/support-operations.md).
 
 ## Security
 
@@ -108,7 +110,8 @@ delivery and are not treated as automatic errors.
 ## Dashboard / diagnostics
 
 Hash-routed console: Overview, Integrations, Requests, Webhooks, Failures,
-Diagnostics. Badges always include text. Optional 60s overview auto-refresh.
+Diagnostics, Support Cases, Audit. Badges always include text. Optional 60s
+overview auto-refresh.
 
 ## Testing
 

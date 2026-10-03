@@ -47,6 +47,12 @@ GitHub Actions
 | Poison event retries forever | Bounded retry policy, failed queue, manual retry/dismiss |
 | Concurrent workers process same event | PostgreSQL row locking with `FOR UPDATE SKIP LOCKED` |
 | Simulated failures alter real health | Simulations are labeled and excluded from live health rules; full-stack smoke checks this |
+| Support notes / audit metadata leak secrets | Length-limited notes; allowlisted audit metadata; response models omit secrets; no token/body dumps |
+| Cross-integration evidence pinned to wrong case | Pin validation requires evidence to belong to the case's integration |
+| Oversized support note / XSS in console | Server length limits; React text escaping (no raw HTML injection) |
+| Unauthenticated support/audit APIs | Same production Bearer gate as other `/api/*` operator routes |
+| GitHub connect audit over-claims identity | Connect remains public; audit is `github_connect_requested` with `actor_type=browser_handoff` and never stores OAuth secrets |
+| Free-form title/name copied into audit | Audit summaries/metadata are structural only (ids/enums/case numbers) |
 | Secret/config file baked into image | Docker ignore rules + CI image tar scan |
 | RDS exposed to internet | Private DB subnets; RDS SG accepts 5432 only from ECS SG |
 | ECS directly exposed on port 8000 | ECS SG accepts 8000 only from ALB SG |
@@ -75,8 +81,9 @@ operator actions remain authenticated.
 ### Single operator key, not identity/RBAC
 
 The gate is intentionally a **single-operator bearer key**, not multi-user
-authentication, SSO, roles, or audit attribution. A real SaaS product should use
-an identity provider and per-user authorization.
+authentication, SSO, or RBAC. Operator audit events attribute actions to
+`operator` (truthful for this model), not a real user identity. A real SaaS
+product should use an identity provider and per-user authorization.
 
 ### CloudFront → ALB uses HTTP
 
