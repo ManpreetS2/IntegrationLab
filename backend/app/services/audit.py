@@ -11,6 +11,7 @@ from app.core.correlation import get_correlation_id
 from app.db.models.support import OperatorAuditEventORM
 
 # Only these metadata keys may be persisted. Keep values scalars / short strings.
+# Structural / enum / id fields only — never free-form operator text (title, name, notes).
 _SAFE_METADATA_KEYS = frozenset(
     {
         "case_number",
@@ -28,13 +29,17 @@ _SAFE_METADATA_KEYS = frozenset(
         "scenario",
         "trigger",
         "outcome",
-        "title",
-        "integration_name",
         "note_id",
         "webhook_event_id",
         "diagnostic_run_id",
         "failure_lab_run_id",
         "provider_request_id",
+        "processed",
+        "retry_scheduled",
+        "failed",
+        "ignored",
+        "skipped",
+        "limit",
     }
 )
 

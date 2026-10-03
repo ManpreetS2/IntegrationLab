@@ -108,6 +108,8 @@ export interface TimelineItem {
   correlation_id: string | null
   correlation_short: string | null
   is_simulated: boolean
+  occurred_at?: string | null
+  pinned_at?: string | null
 }
 
 export interface OperatorAuditEvent {

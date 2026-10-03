@@ -78,3 +78,9 @@ def short_correlation_id(value: UUID | None) -> str | None:
         return None
     text = str(value).replace("-", "")
     return f"corr_{text[:4]}…"
+
+
+def short_entity_id(value: UUID | str) -> str:
+    """Short, non-secret reference for audit summaries (not free-form text)."""
+    text = str(value).replace("-", "")
+    return text[:8]

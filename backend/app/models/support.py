@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Environment(str, Enum):
@@ -77,6 +77,16 @@ class SupportCaseCreate(BaseModel):
     @classmethod
     def normalize_optional(cls, value: Optional[str]) -> Optional[str]:
         return _strip_optional(value)
+
+    @model_validator(mode="after")
+    def source_evidence_pair(self) -> "SupportCaseCreate":
+        has_type = self.source_evidence_type is not None
+        has_id = self.source_evidence_id is not None
+        if has_type != has_id:
+            raise ValueError(
+                "source_evidence_type and source_evidence_id must both be provided or both omitted"
+            )
+        return self
 
 
 class SupportCaseUpdate(BaseModel):
@@ -180,6 +190,13 @@ class SupportCaseDetail(SupportCase):
 
 
 class TimelineItem(BaseModel):
+    """Unified case timeline item.
+
+    ``timestamp`` is the sort key. For linked evidence it is ``occurred_at``
+    (when the underlying evidence happened). Operator pin actions appear
+    separately via case history at ``pinned_at``.
+    """
+
     timestamp: datetime
     type: str
     title: str
@@ -189,6 +206,8 @@ class TimelineItem(BaseModel):
     correlation_id: Optional[UUID] = None
     correlation_short: Optional[str] = None
     is_simulated: bool = False
+    occurred_at: Optional[datetime] = None
+    pinned_at: Optional[datetime] = None
 
 
 class OperatorAuditEvent(BaseModel):

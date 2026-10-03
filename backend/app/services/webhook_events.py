@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.correlation import short_entity_id
 from app.db.models.webhook import WebhookEventORM
 from app.models.webhook import (
     WebhookAttemptResponse,
@@ -22,6 +23,7 @@ from app.repositories.webhooks import (
     webhook_effect_repository,
     webhook_event_repository,
 )
+from app.services.audit import audit_service
 from app.services.webhook_processor import (
     ProcessOutcome,
     StripeWebhookProcessor,
@@ -93,7 +95,13 @@ class WebhookEventService:
             raise HTTPException(status.HTTP_409_CONFLICT, detail="Event is already being processed")
         return self.detail(session, event_id)
 
-    def retry(self, session: Session, event_id: UUID) -> WebhookEventDetail:
+    def retry(
+        self,
+        session: Session,
+        event_id: UUID,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> WebhookEventDetail:
         """Operator retry: new retry cycle with a fresh budget; history kept."""
         event = webhook_event_repository.lock_for_update(session, event_id)
         if event is None:
@@ -113,10 +121,31 @@ class WebhookEventService:
         event.next_attempt_at = now
         event.failed_at = None
         event.dismissed_at = None
+        audit_service.record(
+            session,
+            action="webhook_retry_requested",
+            target_type="webhook_event",
+            target_id=event.id,
+            integration_id=event.integration_id,
+            correlation_id=correlation_id,
+            safe_summary=f"Retried Stripe webhook event {short_entity_id(event.id)}",
+            metadata={
+                "webhook_event_id": str(event.id),
+                "provider": "stripe",
+                "outcome": WebhookProcessingStatus.PENDING.value,
+            },
+            commit=False,
+        )
         session.commit()
         return self.detail(session, event_id)
 
-    def dismiss(self, session: Session, event_id: UUID) -> WebhookEventDetail:
+    def dismiss(
+        self,
+        session: Session,
+        event_id: UUID,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> WebhookEventDetail:
         event = webhook_event_repository.lock_for_update(session, event_id)
         if event is None:
             session.rollback()
@@ -130,6 +159,21 @@ class WebhookEventService:
         event.processing_status = WebhookProcessingStatus.DISMISSED.value
         event.dismissed_at = datetime.now(timezone.utc)
         event.next_attempt_at = None
+        audit_service.record(
+            session,
+            action="webhook_dismissed",
+            target_type="webhook_event",
+            target_id=event.id,
+            integration_id=event.integration_id,
+            correlation_id=correlation_id,
+            safe_summary=f"Dismissed Stripe webhook event {short_entity_id(event.id)}",
+            metadata={
+                "webhook_event_id": str(event.id),
+                "provider": "stripe",
+                "outcome": WebhookProcessingStatus.DISMISSED.value,
+            },
+            commit=False,
+        )
         session.commit()
         return self.detail(session, event_id)
 

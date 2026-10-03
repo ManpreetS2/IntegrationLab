@@ -28,6 +28,15 @@ Statuses:
 
 Transitions are validated in the service layer. Invalid jumps return HTTP 400. History events are written for status/severity changes, evidence pin/unpin, and case open.
 
+### `acknowledged_at` (Phase 1)
+
+Phase 1 cases are created manually by the operator. There is no separate
+acknowledgement workflow or status. On create:
+
+`acknowledged_at = opened_at`
+
+A later support-metrics phase can introduce a richer acknowledgement model if needed.
+
 ## Severity
 
 | Level | Meaning in IntegrationLab |
@@ -47,23 +56,50 @@ Integrations and cases carry an explicit environment:
 
 Existing rows migrate to `local`. Simulated/demo evidence must not be treated as production impact.
 
+## Case numbers
+
+Human-readable identifiers (`CASE-00001`, …) are allocated from the PostgreSQL
+sequence `support_case_number_seq`. Gaps are allowed. Numbers are unique and
+race-safe — never derived from `COUNT(*)` or `MAX(case_number) + 1`.
+
 ## Correlation IDs
 
 - UUID-based (`X-Correlation-ID` accepted only when a valid UUID)
 - Bound with a ContextVar for nested service/repository writes
 - Stored on support cases, audit events, and durable evidence rows where applicable
+- Operator webhook process/retry/dismiss and Failure Lab / diagnostics establish a scope so attempts/runs inherit the same ID
 - Safe to show/copy in the UI (`corr_xxxx…` short form)
 
 No OpenTelemetry / Jaeger / Tempo yet.
 
 ## Operator audit
 
-Append-only `operator_audit_events` for meaningful ACTIONS (create/update case, pin evidence, Failure Lab run, diagnostics, integration create/update).
+Append-only `operator_audit_events` for meaningful ACTIONS:
 
-- Actor is `operator` (single-operator truthfulness)
-- Metadata is allowlisted
+- integration create/update
+- GitHub connect started (`actor_type=browser_handoff` — public OAuth handoff)
+- Failure Lab run, diagnostic run
+- webhook process / process-due / retry / dismiss
+- support case create/status/severity, notes, evidence pin/unpin
+
+Rules:
+
+- Default actor is `operator` (single-operator truthfulness)
+- Metadata is allowlisted (ids/enums/counts only — **no free-form title/name/note text**)
+- `safe_summary` is structural (case number, short entity id, scenario enum, status)
 - Secrets, tokens, Authorization headers, raw webhook bodies are never stored
 - Ordinary GETs do not write audit rows
+
+### Transaction boundaries
+
+| Operation | Boundary |
+|-----------|----------|
+| Integration create/update | Domain row + audit in **one** commit |
+| Failure Lab run | Simulated request log + run + audit in the **success** commit |
+| Diagnostics | In-flight "running" row commits first (lock). Completion checks + audit share the **final** commit |
+| Webhook retry/dismiss | Status change + audit in one commit |
+| Webhook process / process-due | Processor commits attempts; route then writes audit (correlation already bound for attempts) |
+| GitHub connect | Best-effort audit (`browser_handoff`); audit failure must not block OAuth redirect |
 
 ## Evidence pinning
 
@@ -76,24 +112,23 @@ Append-only `operator_audit_events` for meaningful ACTIONS (create/update case, 
 
 Supported types today:
 
-- provider_request
-- webhook_event
-- webhook_attempt
-- diagnostic_run
-- failure_lab_run
-- audit_event
+- provider_request — **must** belong to the case integration (null `integration_id` rejected)
+- webhook_event / webhook_attempt / diagnostic_run / failure_lab_run — same integration
+- audit_event — same integration, **or** unscoped audit already tied to this `support_case_id`
 
 Cross-integration pins are rejected. Failure Lab pins remain labeled simulated.
+
+Create-case source evidence requires **both** `source_evidence_type` and `source_evidence_id`, or neither (422 otherwise).
 
 ## Timeline
 
 Derived (not a giant copy table) from:
 
-- case history
+- case history (operator actions at their own timestamps — including pin/unpin)
 - notes
-- pinned evidence events
+- linked evidence rows sorted by **underlying `occurred_at`**, with `pinned_at` exposed separately
 
-Each item includes timestamp, type, title, summary, optional source reference, correlation id, and simulated flag.
+So a provider failure at 10:01 that is pinned at 10:15 appears at 10:01 as linked evidence; the history entry records the pin action at 10:15.
 
 ## Simulated vs real
 

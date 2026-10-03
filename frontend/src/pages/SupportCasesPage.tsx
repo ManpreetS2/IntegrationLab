@@ -370,6 +370,12 @@ function SupportCasesPage({ integrations }: SupportCasesPageProps) {
                     <div className="timeline-meta">
                       <strong>{item.title}</strong>
                       <span className="muted">{new Date(item.timestamp).toLocaleString()}</span>
+                      {item.occurred_at && item.pinned_at ? (
+                        <span className="muted" title="Evidence occurred vs when it was pinned">
+                          occurred {new Date(item.occurred_at).toLocaleString()} · pinned{' '}
+                          {new Date(item.pinned_at).toLocaleString()}
+                        </span>
+                      ) : null}
                       {item.correlation_short ? (
                         <button
                           type="button"

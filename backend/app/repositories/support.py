@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db.models.support import (
@@ -48,8 +48,15 @@ class SupportCaseRepository:
         return list(session.scalars(statement).all())
 
     def next_case_number(self, session: Session) -> str:
-        count = session.scalar(select(func.count()).select_from(SupportCaseORM)) or 0
-        return f"CASE-{count + 1:05d}"
+        """Allocate the next human-readable case number via a DB sequence.
+
+        Gaps are allowed. Uniqueness is guaranteed by ``nextval`` + the
+        ``uq_support_cases_case_number`` constraint — not by counting rows.
+        """
+        next_val = session.execute(text("SELECT nextval('support_case_number_seq')")).scalar()
+        if next_val is None:
+            raise RuntimeError("support_case_number_seq returned no value")
+        return f"CASE-{int(next_val):05d}"
 
     def add(self, session: Session, case: SupportCaseORM) -> SupportCaseORM:
         session.add(case)

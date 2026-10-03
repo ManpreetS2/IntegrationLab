@@ -15,7 +15,6 @@ from app.models.failure_lab import (
     FailureScenario,
     FailureScenarioInfo,
 )
-from app.services.audit import audit_service
 from app.services.failure_lab import failure_lab_service
 
 router = APIRouter(prefix="/api/failure-lab", tags=["failure-lab"])
@@ -34,24 +33,9 @@ def run_failure_scenario(
     x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
 ) -> FailureLabRunResponse:
     """Run a sandboxed failure simulation (does not call GitHub or mutate credentials)."""
-    with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
-        result = failure_lab_service.run(db, payload)
-        audit_service.record(
-            db,
-            action="failure_lab_run",
-            target_type="failure_lab_run",
-            target_id=result.id,
-            integration_id=result.integration_id,
-            correlation_id=correlation_id,
-            safe_summary=f"Failure Lab scenario '{payload.scenario.value}' executed",
-            metadata={
-                "scenario": payload.scenario.value,
-                "is_simulated": True,
-                "failure_lab_run_id": str(result.id),
-            },
-            commit=True,
-        )
-        return result
+    with correlation_scope(parse_correlation_id(x_correlation_id)):
+        # Audit is recorded inside the service before the success commit.
+        return failure_lab_service.run(db, payload)
 
 
 @router.get("/runs", response_model=list[FailureLabRunListItem])

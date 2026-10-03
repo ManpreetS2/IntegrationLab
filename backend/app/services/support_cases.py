@@ -13,6 +13,7 @@ from app.db.models.diagnostics import DiagnosticRunORM
 from app.db.models.failure_lab import FailureLabRunORM
 from app.db.models.oauth import ProviderRequestLogORM
 from app.db.models.support import (
+    OperatorAuditEventORM,
     SupportCaseEvidenceORM,
     SupportCaseHistoryORM,
     SupportCaseNoteORM,
@@ -57,6 +58,7 @@ class SupportCaseService:
             else (integration.environment or "local")
         )
 
+        # Phase 1 cases are operator-created/manual → acknowledged at open.
         case = SupportCaseORM(
             id=uuid4(),
             case_number=support_case_repository.next_case_number(session),
@@ -70,6 +72,7 @@ class SupportCaseService:
             suspected_cause=payload.suspected_cause,
             correlation_id=correlation_id,
             opened_at=now,
+            acknowledged_at=now,
             created_at=now,
             updated_at=now,
         )
@@ -78,11 +81,11 @@ class SupportCaseService:
             session,
             case,
             event_type="case_opened",
-            summary=f"Support case opened: {case.title}",
+            summary=f"Support case {case.case_number} opened",
             to_value=case.status,
         )
 
-        if payload.source_evidence_type and payload.source_evidence_id:
+        if payload.source_evidence_type is not None and payload.source_evidence_id is not None:
             self.pin_evidence(
                 session,
                 case.id,
@@ -101,7 +104,7 @@ class SupportCaseService:
             integration_id=case.integration_id,
             support_case_id=case.id,
             correlation_id=correlation_id,
-            safe_summary=f"Opened {case.case_number}: {case.title}",
+            safe_summary=f"Opened {case.case_number}",
             metadata={
                 "case_number": case.case_number,
                 "severity": case.severity,
@@ -227,7 +230,7 @@ class SupportCaseService:
 
         resolved = self._resolve_evidence(
             session,
-            case.integration_id,
+            case,
             payload.evidence_type,
             payload.evidence_id,
         )
@@ -249,7 +252,7 @@ class SupportCaseService:
             session,
             case,
             event_type="evidence_pinned",
-            summary=f"Pinned {payload.evidence_type.value}: {label}",
+            summary=f"Pinned {payload.evidence_type.value}",
             to_value=str(payload.evidence_id),
         )
         audit_service.record(
@@ -281,14 +284,16 @@ class SupportCaseService:
         if row is None or row.support_case_id != case.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence pin not found")
         correlation_id = require_correlation_id()
+        evidence_type = row.evidence_type
+        evidence_id = row.evidence_id
         session.delete(row)
         case.updated_at = datetime.now(timezone.utc)
         self._add_history(
             session,
             case,
             event_type="evidence_unpinned",
-            summary=f"Unpinned {row.evidence_type}: {row.safe_label}",
-            from_value=str(row.evidence_id),
+            summary=f"Unpinned {evidence_type}",
+            from_value=str(evidence_id),
         )
         audit_service.record(
             session,
@@ -301,13 +306,19 @@ class SupportCaseService:
             safe_summary=f"Unpinned evidence on {case.case_number}",
             metadata={
                 "case_number": case.case_number,
-                "evidence_type": row.evidence_type,
-                "evidence_id": str(row.evidence_id),
+                "evidence_type": evidence_type,
+                "evidence_id": str(evidence_id),
             },
         )
         session.commit()
 
     def build_timeline(self, session: Session, case_id: UUID) -> list[TimelineItem]:
+        """Derive a chronological timeline.
+
+        Operator actions (open/status/severity/pin/unpin/notes) use their own
+        timestamps. Linked evidence uses ``occurred_at`` as the sort key so a
+        late pin does not imply the underlying event happened at pin time.
+        """
         case = self._require_case(session, case_id)
         items: list[TimelineItem] = []
 
@@ -340,22 +351,28 @@ class SupportCaseService:
             )
 
         for pin in support_case_repository.list_evidence(session, case.id):
+            occurred_at = self._evidence_occurred_at(
+                session, EvidenceType(pin.evidence_type), pin.evidence_id
+            )
+            sort_at = occurred_at or pin.pinned_at
             prefix = "[SIMULATED] " if pin.is_simulated else ""
             items.append(
                 TimelineItem(
-                    timestamp=pin.pinned_at,
-                    type="evidence_pinned",
-                    title=f"{prefix}Evidence pinned",
-                    summary=f"{pin.evidence_type}: {pin.safe_label}",
+                    timestamp=sort_at,
+                    type=pin.evidence_type,
+                    title=f"{prefix}Linked evidence",
+                    summary=pin.safe_label,
                     source_type=pin.evidence_type,
                     source_id=pin.evidence_id,
                     correlation_id=pin.correlation_id,
                     correlation_short=short_correlation_id(pin.correlation_id),
                     is_simulated=pin.is_simulated,
+                    occurred_at=occurred_at,
+                    pinned_at=pin.pinned_at,
                 )
             )
 
-        items.sort(key=lambda item: item.timestamp)
+        items.sort(key=lambda item: (item.timestamp, item.type, str(item.source_id or "")))
         return items
 
     def _transition_status(
@@ -442,20 +459,27 @@ class SupportCaseService:
     def _resolve_evidence(
         self,
         session: Session,
-        integration_id: UUID,
+        case: SupportCaseORM,
         evidence_type: EvidenceType,
         evidence_id: UUID,
     ) -> dict:
+        integration_id = case.integration_id
+
         if evidence_type == EvidenceType.PROVIDER_REQUEST:
             row = session.get(ProviderRequestLogORM, evidence_id)
             if row is None:
                 raise HTTPException(status_code=404, detail="Provider request not found")
-            if row.integration_id and row.integration_id != integration_id:
-                raise HTTPException(status_code=400, detail="Evidence belongs to another integration")
+            # Must be scoped to the same integration — unscoped rows are not attachable.
+            if row.integration_id is None or row.integration_id != integration_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Provider request evidence must belong to the case integration",
+                )
             return {
                 "safe_label": f"{row.provider} {row.method} {row.endpoint} ({row.status_code})",
                 "is_simulated": row.is_simulated,
                 "correlation_id": row.correlation_id,
+                "occurred_at": row.timestamp,
             }
 
         if evidence_type == EvidenceType.WEBHOOK_EVENT:
@@ -468,6 +492,7 @@ class SupportCaseService:
                 "safe_label": f"{row.provider} {row.event_type} [{row.processing_status}]",
                 "is_simulated": False,
                 "correlation_id": None,
+                "occurred_at": row.first_received_at,
             }
 
         if evidence_type == EvidenceType.WEBHOOK_ATTEMPT:
@@ -481,6 +506,7 @@ class SupportCaseService:
                 "safe_label": f"Attempt #{row.attempt_number} → {row.outcome}",
                 "is_simulated": False,
                 "correlation_id": row.correlation_id,
+                "occurred_at": row.started_at,
             }
 
         if evidence_type == EvidenceType.DIAGNOSTIC_RUN:
@@ -493,6 +519,7 @@ class SupportCaseService:
                 "safe_label": f"Diagnostic {row.overall_status}: {row.summary or row.provider}",
                 "is_simulated": False,
                 "correlation_id": row.correlation_id,
+                "occurred_at": row.started_at,
             }
 
         if evidence_type == EvidenceType.FAILURE_LAB_RUN:
@@ -505,23 +532,61 @@ class SupportCaseService:
                 "safe_label": f"[SIMULATED] {row.scenario}: {row.diagnosis_title}",
                 "is_simulated": True,
                 "correlation_id": row.correlation_id,
+                "occurred_at": row.created_at,
             }
 
         if evidence_type == EvidenceType.AUDIT_EVENT:
-            from app.db.models.support import OperatorAuditEventORM
-
             row = session.get(OperatorAuditEventORM, evidence_id)
             if row is None:
                 raise HTTPException(status_code=404, detail="Audit event not found")
-            if row.integration_id and row.integration_id != integration_id:
-                raise HTTPException(status_code=400, detail="Evidence belongs to another integration")
+            if row.integration_id is not None:
+                if row.integration_id != integration_id:
+                    raise HTTPException(
+                        status_code=400, detail="Evidence belongs to another integration"
+                    )
+            elif row.support_case_id != case.id:
+                # Unscoped audit rows may only attach when already about this case.
+                raise HTTPException(
+                    status_code=400,
+                    detail="Unscoped audit evidence can only be pinned to its related support case",
+                )
             return {
                 "safe_label": f"Audit: {row.action}",
                 "is_simulated": False,
                 "correlation_id": row.correlation_id,
+                "occurred_at": row.created_at,
             }
 
         raise HTTPException(status_code=400, detail="Unsupported evidence type")
+
+    def _evidence_occurred_at(
+        self,
+        session: Session,
+        evidence_type: EvidenceType,
+        evidence_id: UUID,
+    ) -> datetime | None:
+        try:
+            if evidence_type == EvidenceType.PROVIDER_REQUEST:
+                row = session.get(ProviderRequestLogORM, evidence_id)
+                return row.timestamp if row else None
+            if evidence_type == EvidenceType.WEBHOOK_EVENT:
+                row = session.get(WebhookEventORM, evidence_id)
+                return row.first_received_at if row else None
+            if evidence_type == EvidenceType.WEBHOOK_ATTEMPT:
+                row = session.get(WebhookProcessingAttemptORM, evidence_id)
+                return row.started_at if row else None
+            if evidence_type == EvidenceType.DIAGNOSTIC_RUN:
+                row = session.get(DiagnosticRunORM, evidence_id)
+                return row.started_at if row else None
+            if evidence_type == EvidenceType.FAILURE_LAB_RUN:
+                row = session.get(FailureLabRunORM, evidence_id)
+                return row.created_at if row else None
+            if evidence_type == EvidenceType.AUDIT_EVENT:
+                row = session.get(OperatorAuditEventORM, evidence_id)
+                return row.created_at if row else None
+        except Exception:  # noqa: BLE001 — timeline must still render
+            return None
+        return None
 
 
 support_case_service = SupportCaseService()

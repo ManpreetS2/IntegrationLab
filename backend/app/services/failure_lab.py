@@ -26,6 +26,8 @@ from app.repositories.oauth import (
     oauth_credential_repository,
     provider_request_log_repository,
 )
+from app.core.correlation import get_correlation_id
+from app.services.audit import audit_service
 from app.services.failure_diagnostics import failure_diagnosis_engine
 from app.services.failure_simulator import provider_failure_simulator
 
@@ -149,6 +151,22 @@ class FailureLabService:
                 evidence_summary=evidence_summary,
                 recommended_checks=checks_json,
                 rate_limit_remaining=observed.rate_limit_remaining,
+            )
+            # Co-commit run + audit so a successful simulation always has audit evidence.
+            audit_service.record(
+                session,
+                action="failure_lab_run",
+                target_type="failure_lab_run",
+                target_id=run.id,
+                integration_id=integration.id,
+                correlation_id=get_correlation_id(),
+                safe_summary=f"Failure Lab scenario '{payload.scenario.value}' executed",
+                metadata={
+                    "scenario": payload.scenario.value,
+                    "is_simulated": True,
+                    "failure_lab_run_id": str(run.id),
+                },
+                commit=False,
             )
             session.commit()
             session.refresh(run)

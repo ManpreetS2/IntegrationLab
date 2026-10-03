@@ -25,8 +25,18 @@ class IntegrationRepository:
         """Fetch one integration by primary key, or None if missing."""
         return session.get(IntegrationORM, integration_id)
 
-    def create(self, session: Session, payload: IntegrationCreate) -> IntegrationORM:
-        """Insert a new integration and return the persisted ORM row."""
+    def create(
+        self,
+        session: Session,
+        payload: IntegrationCreate,
+        *,
+        commit: bool = True,
+    ) -> IntegrationORM:
+        """Insert a new integration and return the persisted ORM row.
+
+        Pass ``commit=False`` when the caller needs to co-commit related rows
+        (for example an operator audit event) in the same transaction.
+        """
         record = IntegrationORM(
             id=uuid4(),
             name=payload.name,
@@ -44,8 +54,11 @@ class IntegrationRepository:
             last_checked_at=None,
         )
         session.add(record)
-        session.commit()
-        session.refresh(record)
+        if commit:
+            session.commit()
+            session.refresh(record)
+        else:
+            session.flush()
         return record
 
     def update_metadata(

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.core.correlation import correlation_scope, parse_correlation_id
+from app.core.correlation import correlation_scope, parse_correlation_id, short_entity_id
 from app.core.database import get_db
 from app.models.integration import Integration, IntegrationCreate, IntegrationUpdate
 from app.repositories.integrations import integration_repository
@@ -42,7 +42,8 @@ def create_integration(
     """Create a new integration and persist it to PostgreSQL."""
     try:
         with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
-            record = integration_repository.create(db, payload)
+            # One transaction: integration row + audit event.
+            record = integration_repository.create(db, payload, commit=False)
             audit_service.record(
                 db,
                 action="integration_created",
@@ -50,14 +51,17 @@ def create_integration(
                 target_id=record.id,
                 integration_id=record.id,
                 correlation_id=correlation_id,
-                safe_summary=f"Created integration '{record.name}' ({record.provider})",
+                safe_summary=(
+                    f"Created {record.provider} integration {short_entity_id(record.id)}"
+                ),
                 metadata={
                     "provider": record.provider,
                     "environment": record.environment,
-                    "integration_name": record.name,
                 },
-                commit=True,
+                commit=False,
             )
+            db.commit()
+            db.refresh(record)
         return Integration.model_validate(record)
     except SQLAlchemyError:
         db.rollback()
@@ -89,12 +93,14 @@ def update_integration(
                 target_id=updated.id,
                 integration_id=updated.id,
                 correlation_id=correlation_id,
-                safe_summary=f"Updated integration '{updated.name}' metadata",
+                safe_summary=(
+                    f"Updated {updated.provider} integration {short_entity_id(updated.id)} metadata"
+                ),
                 metadata={
                     "provider": updated.provider,
                     "environment": updated.environment,
-                    "integration_name": updated.name,
                 },
+                commit=False,
             )
             db.commit()
             db.refresh(updated)

@@ -84,6 +84,9 @@ def upgrade() -> None:
     )
 
     # --- Support cases ---
+    # Race-safe case numbers (gaps allowed). Do not derive from COUNT/MAX.
+    op.execute(sa.text("CREATE SEQUENCE support_case_number_seq START WITH 1 INCREMENT BY 1"))
+
     op.create_table(
         "support_cases",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -240,6 +243,7 @@ def downgrade() -> None:
     op.drop_index("ix_support_cases_status", table_name="support_cases")
     op.drop_index("ix_support_cases_integration_id", table_name="support_cases")
     op.drop_table("support_cases")
+    op.execute(sa.text("DROP SEQUENCE IF EXISTS support_case_number_seq"))
 
     op.drop_index(
         "ix_webhook_processing_attempts_correlation_id",
