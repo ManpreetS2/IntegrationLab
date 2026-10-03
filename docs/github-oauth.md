@@ -28,25 +28,28 @@ We are **not** converting the project into a GitHub App here.
 
 1. Open [GitHub Developer Settings → OAuth Apps](https://github.com/settings/developers).
 2. Click **New OAuth App**.
-3. Fill in:
+3. For the **full Compose stack** (`make compose-up`, UI on `:8080`) fill in:
    - **Application name:** IntegrationLab Local (or similar)
-   - **Homepage URL:** `http://localhost:5173`
-   - **Authorization callback URL:** `http://localhost:8000/api/oauth/github/callback`
+   - **Homepage URL:** `http://localhost:8080`
+   - **Authorization callback URL:** `http://localhost:8080/api/oauth/github/callback`
 4. Register the application.
 5. Copy the **Client ID**.
 6. Generate a **Client secret** and copy it once (GitHub shows it only briefly).
+
+For split local dev (Vite `:5173` + API `:8000`), use homepage `http://localhost:5173`
+and callback `http://localhost:8000/api/oauth/github/callback` instead.
 
 Never commit the client secret. Never put it in React or frontend env files.
 
 ## Environment variables
 
-In `backend/.env` (copied from `.env.example`):
+In project-root `.env` (Compose) and/or `backend/.env` (copied from `.env.example`):
 
 ```bash
 GITHUB_CLIENT_ID=your_client_id_here
 GITHUB_CLIENT_SECRET=your_client_secret_here
-GITHUB_OAUTH_REDIRECT_URI=http://localhost:8000/api/oauth/github/callback
-FRONTEND_URL=http://localhost:5173
+GITHUB_OAUTH_REDIRECT_URI=http://localhost:8080/api/oauth/github/callback
+FRONTEND_URL=http://localhost:8080
 TOKEN_ENCRYPTION_KEY=your_fernet_key_here
 ```
 

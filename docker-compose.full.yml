@@ -62,6 +62,13 @@ services:
       FRONTEND_URL: http://localhost:8080
       GITHUB_OAUTH_REDIRECT_URI: http://localhost:8080/api/oauth/github/callback
       CORS_ORIGINS: '["http://localhost:8080"]'
+      # Real provider acceptance — supply via shell env or a local `.env` next to
+      # this compose file (never commit real values). OAuth/webhook routes return
+      # clear 503s when these are unset.
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

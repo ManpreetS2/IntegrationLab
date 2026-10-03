@@ -58,19 +58,32 @@ Failure Lab rows remain explicitly `is_simulated=true`. The demo script does
 **not** forge signed Stripe deliveries and does not claim a real GitHub OAuth
 connection.
 
-## Still requires real external acceptance
+## External / provider acceptance matrix
 
-These cannot be proven by repository CI alone:
+Update rows only after the matching step in
+[external-acceptance.md](external-acceptance.md) succeeds.
 
-- Terraform `apply` in a user-controlled AWS account
-- CloudFront → ALB → ECS → RDS runtime acceptance
-- GitHub OAuth authorize/callback with a real OAuth App
-- a real Stripe CLI signed webhook through the deployed CloudFront URL
-- CloudWatch inspection after a real task runs
-- screenshots of the final deployed console
+| Claim | Status |
+|---|---|
+| GitHub OAuth authorize/callback + PKCE + encrypted token | Implemented · CI unit coverage · **not Externally verified yet** |
+| Real GitHub `GET /user` provider request (`is_simulated=false`) | Implemented · CI unit coverage · **not Externally verified yet** |
+| GitHub OAuth deny/cancel or revocation negative path | Implemented · **not Externally verified yet** |
+| Stripe CLI signed webhook → durable receipt | Implemented · CI signed-fixture coverage · **not Externally verified yet** |
+| Stripe process + effect + process intent audit | Implemented · CI verified · **not Externally verified yet** |
+| Stripe duplicate delivery (`delivery_count` + one effect) | Implemented · CI verified · **not Externally verified yet** |
+| Stripe failed queue + manual retry | Implemented · CI verified · **not Externally verified yet** |
+| Support case from real provider evidence | Implemented · CI (Failure Lab path) · **not Externally verified yet** (real path) |
+| Terraform AWS topology | Implemented · CI `fmt`/`validate` · **not Externally verified** (no apply) |
+| CloudFront → ALB → ECS → RDS runtime | Implemented · **not Externally verified** |
 
-Until those happen, documentation must continue saying they are **not
-externally verified**.
+## Still requires user-controlled external systems
+
+- Docker/Compose available on the acceptance machine
+- GitHub OAuth App credentials in local `.env`
+- Stripe CLI login + `stripe listen` signing secret
+- Optional later: `terraform apply` + CloudFront runtime (cost approval)
+
+Until those succeed, do **not** upgrade the matrix rows above to Externally verified.
 
 ## Rule for portfolio claims
 

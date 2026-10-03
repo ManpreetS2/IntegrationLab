@@ -1,290 +1,170 @@
 # IntegrationLab
 
-IntegrationLab is a partner-integration reliability console for connecting,
-monitoring, debugging, and recovering third-party API and webhook integrations.
+A support and reliability console for debugging third-party API and webhook integrations.
 
-**Problem:** third-party integrations fail in messy, ambiguous ways — expired
-tokens, flaky networks, at-least-once webhooks, retries that look like
-duplicates, and dashboards that invent uptime instead of showing evidence.
+**Problem:** partner integrations fail for many different reasons — expired credentials, permissions, rate limits, provider outages, at-least-once webhooks, duplicate deliveries, processing bugs, and configuration mistakes. Dashboards that invent uptime make that worse.
 
-**Solution:** IntegrationLab gives engineers durable event handling,
-observability from real stored evidence, deterministic health and diagnostics,
-and an operator recovery workflow — protected by a runtime single-operator
-access gate and packaged with CI plus an AWS deployment architecture suitable
-for internship interviews.
+**Solution:** IntegrationLab turns messy provider behavior into **durable evidence**, **deterministic health**, **guided diagnostics**, and **operator support cases** with correlation and audit — so you can answer what broke, what evidence matters, what the operator did, and what state the investigation is in.
 
-| Reader | Time | What to look at |
-|--------|------|-----------------|
-| Recruiter | 20s | This README intro + Features |
-| Engineer | 2 min | Architecture + Reliability + Security |
-| Interviewer | 10 min | Case study, ADRs, demo script, live console |
+| Reader | Time | Start here |
+|--------|------|------------|
+| Recruiter | 30s | This intro + Demo + Features |
+| Engineer | 3 min | Architecture + Reliability + Security |
+| Interviewer | 10 min | Live console, [demo script](docs/demo-script.md), [ADRs](docs/adr/), [case study](docs/customer-case-study.md) |
 
 ## Why I built it
 
-Partner integrations are where backend engineering meets customer impact. I
-wanted a project that proves I can:
+Calling an API is easy. Diagnosing a broken customer integration under time pressure is not.
 
-- design idempotent webhook intake and bounded retries
-- separate **evidence** from **conclusions** in a reliability model
-- keep secrets out of logs, images, and Terraform state
-- ship CI that blocks bad PRs and CD that migrates before deploy
-- explain cost and security tradeoffs in a real AWS topology
+I wanted a portfolio project that proves I can design:
+
+- OAuth connection flows with real security hygiene (state + PKCE + encrypted tokens)
+- Stripe-style webhook reliability (raw-body signatures, dedupe, idempotent effects, bounded retries)
+- evidence-based reliability (not fake uptime)
+- support operations on top of that evidence (cases, timeline, audit, correlation)
+- CI packaging and a cost-conscious AWS architecture I can explain honestly
+
+## What it does
+
+- **GitHub OAuth** — authorization code + state + PKCE, Fernet-encrypted tokens, profile + connection check
+- **Provider request evidence** — real vs **SIMULATED** clearly separated
+- **Failure Lab** — deterministic provider failure reproduction without mutating live health
+- **Stripe webhooks** — signature verify → durable receipt → process → 1s/2s/4s retry → failed queue
+- **Delivery dedupe + effect idempotency** — at-least-once safe
+- **Reliability dashboard** — health derived from stored evidence only (no surprise provider calls)
+- **Guided diagnostics** — persisted runs/checks; optional real GitHub probe when asked
+- **Support Cases** — lifecycle, severity, notes, evidence pinning, derived timeline
+- **Correlation IDs + operator audit** — intent audited before webhook side effects; safe metadata allowlist
+- **Docker Compose + CI** — Postgres → migrate → API → nginx UI; six GitHub Actions quality gates
+- **Terraform AWS architecture** — CloudFront, S3, ALB, ECS/Fargate, RDS, Secrets Manager, OIDC (apply is manual)
+
+## Demo
+
+Canonical story once external acceptance is complete (see [docs/external-acceptance.md](docs/external-acceptance.md)):
+
+1. GitHub auth problem observed (real check or clearly labeled Failure Lab)
+2. Diagnostics / provider evidence
+3. Support Case → pin evidence → note → status transitions
+4. Correlation + audit trail
+5. Recovery / reconnect (when exercised)
+6. Optional: Stripe signed webhook → process → duplicate → failed queue → retry
+
+Screenshots (safe only): [docs/assets/portfolio/](docs/assets/portfolio/).
+
+Until real provider acceptance finishes, use `make demo` for a deterministic **simulated** dataset and say so out loud.
 
 ## Architecture
 
-Local / app:
+```mermaid
+flowchart LR
+  Browser[Browser / React console]
+  Nginx[nginx same-origin proxy]
+  API[FastAPI]
+  DB[(PostgreSQL)]
+  GH[GitHub OAuth / REST]
+  ST[Stripe webhooks]
 
-```text
-Browser → React console → FastAPI → PostgreSQL
-                           ├─ GitHub OAuth + request logs
-                           ├─ Failure Lab (simulated)
-                           └─ Stripe webhooks (verify → store → process → retry)
+  Browser --> Nginx
+  Nginx --> API
+  API --> DB
+  API -->|outbound real or simulated| GH
+  ST -->|signed inbound| Nginx
 ```
 
-AWS (Terraform; apply is user-controlled):
+Domain modules on the API: OAuth + provider requests · Failure Lab · webhook receiver/processor · reliability · diagnostics · Support Cases · audit/correlation.
 
-```text
-CloudFront (HTTPS)
-  ├── S3 frontend (private, OAC)
-  └── ALB → ECS Fargate → RDS (private)
-                ↑ Secrets Manager
-GitHub Actions → OIDC → ECR / ECS / S3 / CloudFront
-```
-
-Reliability dashboard loads **do not** call providers. Guided diagnostics may
-probe GitHub when an operator asks. Details: [docs/architecture.md](docs/architecture.md).
-
-## Features
-
-- GitHub OAuth (state + PKCE + encrypted tokens)
-- Provider request observability (real vs simulated)
-- Failure Lab with deterministic diagnosis
-- Stripe webhooks: signature verification, dedupe, idempotent effects, 1s/2s/4s retries, failed queue
-- Reliability overview + failures feed + request metrics (p95)
-- Guided diagnostics with persisted runs/checks
-- Support Cases foundation: lifecycle, severity, evidence pinning, notes, derived timeline, operator audit, correlation IDs
-- Production-mode single-operator Bearer gate (runtime key; never baked into Vite)
-- Production Docker image + full local compose stack
-- GitHub Actions CI (tests, lint/build, Docker, Terraform validate)
-- Manual AWS deploy workflow (OIDC, migrate-before-deploy, smoke tests)
+AWS topology (Terraform; **not auto-applied**): CloudFront → S3 + ALB → ECS Fargate → private RDS; Secrets Manager; GitHub Actions OIDC. Details: [docs/architecture.md](docs/architecture.md), [docs/aws-deployment.md](docs/aws-deployment.md).
 
 ## Reliability engineering
 
-Health states: `healthy` / `degraded` / `failed` / `unknown` / `not_configured`.
-
-- Health ≠ connection status
+- Health ∈ `healthy` / `degraded` / `failed` / `unknown` / `not_configured`
 - Missing evidence → `unknown` (never fake healthy)
 - Simulations excluded from live health
-- Database outage → 503 "Database unavailable", not "every provider failed"
-
-See [docs/reliability.md](docs/reliability.md), [docs/diagnostics.md](docs/diagnostics.md), and
-[docs/support-operations.md](docs/support-operations.md).
+- Provider **delivery dedupe** ≠ **business-effect idempotency** (both implemented)
+- Append-only processing attempts; bounded retries; failed queue for operators
 
 ## Security
 
-- Fernet-encrypted OAuth tokens at rest
-- Stripe signature verification on the exact raw body
-- Secrets Manager for RDS + provider secrets in AWS
-- GitHub Actions → AWS via **OIDC** (no static access keys)
-- Production refuses to boot without a 24+ character operator key
-- Operator key stays in Secrets Manager/server config and browser sessionStorage, not the bundle
-- Diagnostics/reliability responses tested for secret leakage
-- Production image must not contain `.env` or Terraform state
+- OAuth `state` + PKCE; tokens encrypted at rest
+- Stripe signatures over the **exact raw body**
+- Single-operator Bearer gate in production (runtime key; not baked into Vite)
+- Audit allowlist; no tokens/bodies/Authorization headers in audit metadata
+- Threat model: [docs/threat-model.md](docs/threat-model.md)
 
-## Failure Lab
+Not multi-user RBAC. Not multi-tenant authz.
 
-Sandboxed scenarios (401/403/429/500/timeout/…) that write **simulated** request
-logs and a diagnosis without mutating real connection health.
-
-## GitHub OAuth
-
-Connect flow with state + PKCE, encrypted credential storage, connection check,
-and guided diagnostics that can issue one real `GET /user` when requested.
-
-## Stripe webhooks
-
-Verify → durable store → 200 → process → bounded retry → failed queue → manual
-retry with effect-level idempotency. Duplicates are expected under at-least-once
-delivery and are not treated as automatic errors.
-
-## Dashboard / diagnostics
-
-Hash-routed console: Overview, Integrations, Requests, Webhooks, Failures,
-Diagnostics, Support Cases, Audit. Badges always include text. Optional 60s
-overview auto-refresh.
-
-## Testing
+## Testing & CI
 
 ```bash
-cd backend && source .venv/bin/activate && pytest
-cd frontend && npm run lint && npm run build
+make verify        # pytest + frontend lint/build + terraform validate
+make full-verify   # above + assembled Compose smoke
 ```
 
-CI also builds both Docker images, validates Terraform, and boots the complete
-Compose stack. The `full-stack-smoke` job proves migrations, production-mode
-operator auth, an authenticated write, Failure Lab persistence, and reliability
-aggregation work together.
+CI on every PR/`main` push: backend tests (Postgres 18 + `_test` guard), frontend quality, both container builds, full-stack smoke, Terraform fmt/validate.
+
+Claim → evidence matrix: [docs/verification.md](docs/verification.md).
+
+## Verification vocabulary
+
+| Status | Meaning |
+|--------|---------|
+| **Implemented** | Code/config exists |
+| **CI verified** | Repository automation exercised it |
+| **Locally verified** | Ran on a developer machine |
+| **Externally verified** | Real provider/cloud step succeeded |
+
+AWS apply, real GitHub OAuth, and Stripe CLI delivery are only **Externally verified** after they are actually run. See [docs/external-acceptance.md](docs/external-acceptance.md).
+
+## Engineering decisions worth discussing
+
+1. PostgreSQL as the retry/dedupe store instead of adding Redis/Kafka for v1
+2. ContextVar UUID correlation before adopting OpenTelemetry
+3. Support timeline **derived** from history + notes + linked evidence (`occurred_at` vs `pinned_at`)
+4. Sequence-generated `CASE-#####` numbers (race-safe; gaps OK)
+5. Webhook process **intent** audited and committed before the processor’s multi-transaction work
+6. Real vs simulated evidence never silently mixed into live health
+
+ADRs: [docs/adr/](docs/adr/).
+
+## Run locally
+
+**Production-like Compose (preferred for demos):**
 
 ```bash
-make full-verify
+cp .env.example .env   # then fill secrets (see docs/external-acceptance.md)
+make compose-up
+# UI http://localhost:8080  — unlock with OPERATOR_API_KEY
+make demo              # optional simulated dataset
 ```
 
-See [docs/verification.md](docs/verification.md) for the claim → evidence matrix.
+**Day-to-day split process:** Postgres via `docker compose up -d postgres`, backend venv + `uvicorn`, frontend `npm run dev` (see `.env.example`).
 
-## CI/CD
+## AWS architecture
 
-- **CI** on every PR/`main` push: backend tests (Postgres 18 + `_test` guard),
-  frontend quality, both container builds, assembled-stack smoke, Terraform fmt/validate
-- **CD** is **manual** (`workflow_dispatch`) against GitHub Environment
-  `production`: SHA image → migration task → ECS → S3 → CloudFront → smoke tests
+Terraform under `infra/terraform` defines the portfolio topology. Cost-conscious defaults (no NAT, single-AZ RDS, one task).
 
-See [docs/ci-cd.md](docs/ci-cd.md).
+**Not deployed unless you explicitly `terraform apply` and accept cost.** Do not read this README as “hosted in AWS.”
 
-## AWS deployment architecture
+## Limitations (honest)
 
-Terraform under `infra/terraform` defines VPC, ALB, ECS/Fargate, ECR, RDS,
-Secrets Manager, S3, CloudFront, CloudWatch, and GitHub OIDC.
-
-Cost-conscious defaults: no NAT Gateway, single-AZ RDS, one task, short log
-retention, `desired_count = 0` until first deploy.
-
-**AWS INFRASTRUCTURE IS NOT AUTO-APPLIED.** You must run `terraform apply`
-yourself and accept AWS cost. Guide: [docs/aws-deployment.md](docs/aws-deployment.md).
-
-## Incident case study
-
-Hypothetical financial-services webhook processing incident — delivery OK,
-processing failed, bounded retries, failed queue, recovery with idempotent
-effects. Interview deck + demo script included.
-
-- [docs/customer-case-study.md](docs/customer-case-study.md)
-- [docs/customer-case-study-deck.md](docs/customer-case-study-deck.md)
-- [docs/demo-script.md](docs/demo-script.md)
-
-## Local setup
-
-### Simple developer workflow (recommended day-to-day)
-
-```bash
-docker compose up -d postgres   # or local Postgres matching DATABASE_URL
-cp .env.example backend/.env
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-alembic upgrade head
-python -m app.scripts.seed
-uvicorn app.main:app --reload --port 8000
-```
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Console: `http://localhost:5173/#/overview`
-
-### Full container stack (production-like local)
-
-```bash
-docker compose -f docker-compose.full.yml up --build
-# Ordering: postgres healthy → alembic upgrade head (one-shot) → backend → frontend
-# UI http://localhost:8080  API http://localhost:8000
-```
-
-The production backend image does **not** migrate on every boot. Compose runs a
-one-shot `migrate` service (`alembic upgrade head`) that must complete
-successfully before the API container starts — the same pattern as the ECS
-one-off migration task.
-
-Compose runs in production mode, so the operator gate is enabled. The local
-default key is `local-demo-operator-key-change-me`; override it with
-`OPERATOR_API_KEY`.
-
-For an interview-ready deterministic dataset:
-
-```bash
-make demo
-```
-
-This populates explicitly simulated Failure Lab evidence and diagnostics without
-pretending that GitHub OAuth or Stripe delivery was externally verified.
-
-## Screenshots
-
-_Placeholder — add Overview / Failures / Diagnostics / AWS diagram screenshots
-here before portfolio publication._
-
-## Technical decisions
-
-Short ADRs live in [docs/adr/](docs/adr/):
-
-- Sync SQLAlchemy + careful async Session boundary
-- GitHub OAuth App (not GitHub App)
-- PostgreSQL as the retry queue
-- CloudFront single origin for UI + API
-- Public Fargate without NAT for portfolio cost
-
-## Tradeoffs
-
-| Choice | Gain | Cost |
-|--------|------|------|
-| No NAT | Lower AWS bill | Tasks use public IPs (SG-restricted inbound) |
-| Single-AZ RDS | Lower cost | No Multi-AZ HA |
-| Manual CD | No surprise spend | Not continuous delivery yet |
-| Operator webhook tick | Simple, explicit | Not a continuous worker |
-| Hash routing | Simple SPA deploy | Deep-link UX differs from path routing |
-
-## Known limitations
-
-- Real GitHub OAuth and Stripe CLI flows not verified in this environment
-- AWS stack written and validated statically; apply is user-controlled
-- No continuous webhook worker / EventBridge scheduler by default
-- No alerts, multi-user auth, or data retention policy
-- Single-operator bearer access only; no user identity/RBAC/multi-tenancy
-- CloudFront→ALB uses HTTP in the portfolio design (viewer HTTPS only); real sensitive use should add origin TLS
-- No WAF/application rate limiter in the default stack
-
-## What I learned
-
-- Reliability dashboards must separate evidence from conclusions
-- Webhook systems need durable receipt before business processing
-- Migrations belong in deploy, not on every container boot
-- OIDC beats long-lived cloud keys for GitHub Actions
-- Cost-aware architecture is part of engineering judgment
+- Single-operator access (no SSO/RBAC/multi-tenancy)
+- No WAF / application rate limiter in the default stack
+- Webhook processing is operator/CLI-triggered (no always-on worker by default)
+- No Stripe Events reconciliation, provider-status correlation, or batch recovery yet ([Phase 2 backlog](docs/phase-2-backlog.md))
+- CloudFront→ALB HTTP in the portfolio design (viewer HTTPS); real sensitive use needs origin TLS
+- AWS stack is implemented + CI-validated, not automatically applied
 
 ## Docs index
 
 | Doc | Topic |
 |-----|-------|
-| [architecture.md](docs/architecture.md) | System + AWS diagram |
-| [reliability.md](docs/reliability.md) | Health model |
-| [diagnostics.md](docs/diagnostics.md) | Guided checks |
-| [stripe-webhooks.md](docs/stripe-webhooks.md) | Webhook engine |
-| [aws-deployment.md](docs/aws-deployment.md) | Provision + deploy |
-| [aws-costs.md](docs/aws-costs.md) | Cost drivers |
-| [deployment.md](docs/deployment.md) | Migrate / rollback |
-| [ci-cd.md](docs/ci-cd.md) | Pipelines |
-| [verification.md](docs/verification.md) | Claim → automated evidence matrix |
-| [threat-model.md](docs/threat-model.md) | Trust boundaries, controls, residual risk |
+| [external-acceptance.md](docs/external-acceptance.md) | Real GitHub/Stripe acceptance checklist |
+| [support-operations.md](docs/support-operations.md) | Cases, audit, correlation, timeline |
+| [verification.md](docs/verification.md) | Claim → evidence matrix |
+| [demo-script.md](docs/demo-script.md) | 60s + 5-minute walkthrough |
+| [interview-questions.md](docs/interview-questions.md) | Concise Q&A |
+| [resume-bullets.md](docs/resume-bullets.md) | Resume-ready bullets |
+| [linkedin-post.md](docs/linkedin-post.md) | Project post draft |
+| [phase-2-backlog.md](docs/phase-2-backlog.md) | Explicitly not built yet |
+| [threat-model.md](docs/threat-model.md) | Trust boundaries |
 | [customer-case-study.md](docs/customer-case-study.md) | Incident exercise |
-| [interview-questions.md](docs/interview-questions.md) | Q&A |
-
-## Current non-features
-
-- AWS auto-apply / always-on expensive HA defaults
-- AI diagnosis
-- Multi-user identity / RBAC (single-operator bearer gate only)
-- Redis / Celery / EKS / Lambda rewrite
-
-## Completion status
-
-The repository-side engineering milestone is complete when PR CI is green:
-application behavior, Docker packaging, assembled-stack smoke, Terraform
-validation, operator access control, deployment workflow, incident exercise,
-verification matrix, and threat model are versioned together.
-
-The remaining acceptance work requires user-controlled external systems rather
-than more speculative code: real AWS apply, real GitHub OAuth, real Stripe CLI
-delivery, and final screenshots. Those remain explicitly unverified until they
-are actually run.
