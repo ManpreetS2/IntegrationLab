@@ -47,7 +47,7 @@ The Docker smoke path removes its temporary Compose volume when it finishes.
 make demo
 ```
 
-This starts the production-like local stack and populates:
+This starts the full local Compose stack and populates:
 
 - a GitHub demo integration
 - a Stripe demo integration
@@ -71,7 +71,8 @@ Update rows only after the matching step in
 | Stripe CLI signed webhook → durable receipt | **Externally verified** (`stripe listen` → HTTP 200, `signature_verified=true`) |
 | Stripe process + effect + process intent audit | **Externally verified** (`payment_success_recorded` + `webhook_process_*` audit) |
 | Stripe duplicate delivery (`delivery_count` + one effect) | **Externally verified** (`delivery_count=2`, one effect; `duplicate_deliveries=1`) |
-| Stripe failed queue + manual retry | **Externally verified** — signed invalid `data.object` → `webhook_invalid_event_data` → failed queue (permanent; not retryable) |
+| Stripe failed queue + failure classification | **Externally verified** — signed invalid `data.object` → `webhook_invalid_event_data` → failed queue (permanent / non-retryable) |
+| Stripe manual retry / dismiss of failed events | Implemented · CI verified · **not Externally verified** (external run used a permanent failure; manual retry was not exercised) |
 | Support case from real provider evidence | **Externally verified** — `CASE-00001` with pinned real request + diagnostics + audit |
 | Local Compose full stack boot | **Locally verified** |
 | Terraform AWS topology | Implemented · CI `fmt`/`validate` · **not Externally verified** (no apply) |

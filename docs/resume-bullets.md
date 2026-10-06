@@ -18,7 +18,8 @@ Rewrite to match your resume voice. Prefer bullets that match **actual verificat
 
 - Separated simulated Failure Lab evidence from live health scoring and enforced secret-safe observability and audit metadata allowlists.
 
-## Avoid until true
+## Current verification status (keep resume claims aligned)
 
+- GitHub OAuth + Stripe CLI acceptance on local Compose are **Externally verified** (see `docs/verification.md`).
+- Manual Stripe retry/dismiss of failed events is **Implemented / CI verified**, not claimed as externally exercised in the portfolio run.
 - Do **not** say “deployed to AWS” unless `terraform apply` and runtime acceptance completed.
-- Do **not** say “externally verified GitHub/Stripe” until those runbook steps succeed (see `docs/external-acceptance.md` / `docs/verification.md`).

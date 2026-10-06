@@ -184,6 +184,7 @@ AI diagnosis, multi-tenancy, Redis/Kafka/Celery, Kubernetes, Slack/PagerDuty,
 auto `terraform apply`, and pretending AWS was deployed without apply.
 
 ### What remains missing?
-External GitHub OAuth and Stripe CLI acceptance until the runbook is executed;
-AWS apply until cost is accepted; continuous worker/alerts/custom domain for a
-stricter production posture. Phase 2 items stay explicitly unimplemented.
+AWS apply/runtime until cost is accepted; a continuous webhook worker/scheduler;
+WAF/rate limiting; multi-user RBAC and multi-tenancy; alerts/custom domain for a
+stricter production posture. Phase 2 backlog items stay explicitly unimplemented.
+GitHub OAuth and Stripe CLI acceptance on Compose are already Externally verified.

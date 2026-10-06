@@ -1,4 +1,4 @@
-# Full local container stack (production-like).
+# Full local container stack (Compose packaging; not AWS production mode).
 #
 # Usage:
 #   docker compose -f docker-compose.full.yml up --build

@@ -38,7 +38,8 @@ Always say when evidence is **SIMULATED**.
 - `stripe listen` → signature verified → durable receipt → HTTP 200.
 - Process → attempts append-only; `payment_success_recorded` once.
 - Duplicate delivery: `delivery_count`↑, still one effect.
-- Failed queue: invalid `data.object` → `webhook_invalid_event_data` (permanent).
+- Failed queue: invalid `data.object` → `webhook_invalid_event_data` (permanent / non-retryable classification).
+- Manual retry exists in product/CI; do not claim it was externally demonstrated unless you re-run that step.
 - Intent audit **before** process.
 
 ### 4. Support operations (60s)

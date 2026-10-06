@@ -40,18 +40,18 @@ I wanted a portfolio project that proves I can design:
 
 ## Demo
 
-Canonical story once external acceptance is complete (see [docs/external-acceptance.md](docs/external-acceptance.md)):
+Canonical story after the completed external-acceptance run (see [docs/external-acceptance.md](docs/external-acceptance.md) and [docs/verification.md](docs/verification.md)):
 
-1. GitHub auth problem observed (real check or clearly labeled Failure Lab)
-2. Diagnostics / provider evidence
+1. Real GitHub OAuth connect + encrypted token + `GET /user`
+2. Diagnostics / provider evidence (`is_simulated=false`)
 3. Support Case → pin evidence → note → status transitions
 4. Correlation + audit trail
-5. Recovery / reconnect (when exercised)
-6. Optional: Stripe signed webhook → process → duplicate → failed queue → retry
+5. Revoke/reconnect negative path (when demonstrating recovery)
+6. Stripe signed webhook → process → duplicate absorption → failed queue (permanent failure classification)
 
 Screenshots (safe only): [docs/assets/portfolio/](docs/assets/portfolio/).
 
-Until real provider acceptance finishes, use `make demo` for a deterministic **simulated** dataset and say so out loud.
+For a deterministic **simulated** dataset without touching providers, use `make demo` and say so out loud.
 
 ## Architecture
 
@@ -134,7 +134,7 @@ ADRs: [docs/adr/](docs/adr/).
 
 ## Run locally
 
-**Production-like Compose (preferred for demos):**
+**Full local Compose stack (preferred for demos):**
 
 ```bash
 cp .env.example .env   # then fill secrets (see docs/external-acceptance.md)
