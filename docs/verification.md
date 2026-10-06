@@ -65,25 +65,23 @@ Update rows only after the matching step in
 
 | Claim | Status |
 |---|---|
-| GitHub OAuth authorize/callback + PKCE + encrypted token | Implemented · CI unit coverage · **not Externally verified yet** |
-| Real GitHub `GET /user` provider request (`is_simulated=false`) | Implemented · CI unit coverage · **not Externally verified yet** |
-| GitHub OAuth deny/cancel or revocation negative path | Implemented · **not Externally verified yet** |
-| Stripe CLI signed webhook → durable receipt | Implemented · CI signed-fixture coverage · **not Externally verified yet** |
-| Stripe process + effect + process intent audit | Implemented · CI verified · **not Externally verified yet** |
-| Stripe duplicate delivery (`delivery_count` + one effect) | Implemented · CI verified · **not Externally verified yet** |
-| Stripe failed queue + manual retry | Implemented · CI verified · **not Externally verified yet** |
-| Support case from real provider evidence | Implemented · CI (Failure Lab path) · **not Externally verified yet** (real path) |
+| GitHub OAuth authorize/callback + PKCE + encrypted token | **Externally verified** (Compose `:8080`, OAuth App `IntegrationLab Local`) |
+| Real GitHub `GET /user` provider request (`is_simulated=false`) | **Externally verified** |
+| GitHub OAuth deny/cancel or revocation negative path | **Externally verified** — cancel callback (`status=cancelled`, no credential leak) + revoke → `github_unauthorized` / diagnostics auth fail → reconnect |
+| Stripe CLI signed webhook → durable receipt | **Externally verified** (`stripe listen` → HTTP 200, `signature_verified=true`) |
+| Stripe process + effect + process intent audit | **Externally verified** (`payment_success_recorded` + `webhook_process_*` audit) |
+| Stripe duplicate delivery (`delivery_count` + one effect) | **Externally verified** (`delivery_count=2`, one effect; `duplicate_deliveries=1`) |
+| Stripe failed queue + manual retry | **Externally verified** — signed invalid `data.object` → `webhook_invalid_event_data` → failed queue (permanent; not retryable) |
+| Support case from real provider evidence | **Externally verified** — `CASE-00001` with pinned real request + diagnostics + audit |
+| Local Compose full stack boot | **Locally verified** |
 | Terraform AWS topology | Implemented · CI `fmt`/`validate` · **not Externally verified** (no apply) |
 | CloudFront → ALB → ECS → RDS runtime | Implemented · **not Externally verified** |
 
 ## Still requires user-controlled external systems
 
-- Docker/Compose available on the acceptance machine
-- GitHub OAuth App credentials in local `.env`
-- Stripe CLI login + `stripe listen` signing secret
 - Optional later: `terraform apply` + CloudFront runtime (cost approval)
 
-Until those succeed, do **not** upgrade the matrix rows above to Externally verified.
+GitHub OAuth App credentials, Stripe CLI login, and Compose boot were completed for the portfolio acceptance run documented above.
 
 ## Rule for portfolio claims
 

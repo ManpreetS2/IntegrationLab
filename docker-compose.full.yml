@@ -39,7 +39,9 @@ services:
       dockerfile: backend/Dockerfile
     container_name: integrationlab-full-migrate
     environment:
-      APP_ENV: production
+      # Local Compose defaults to development so short demo operator keys work.
+      # Production AWS still uses APP_ENV=production (≥24-char key required).
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@postgres:5432/integrationlab
       OPERATOR_API_KEY: ${OPERATOR_API_KEY:-local-demo-operator-key-change-me}
     depends_on:
@@ -55,7 +57,7 @@ services:
       dockerfile: backend/Dockerfile
     container_name: integrationlab-full-backend
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-development}
       APP_VERSION: local-compose
       DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@postgres:5432/integrationlab
       OPERATOR_API_KEY: ${OPERATOR_API_KEY:-local-demo-operator-key-change-me}

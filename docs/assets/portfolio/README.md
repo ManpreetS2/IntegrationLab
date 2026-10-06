@@ -23,4 +23,5 @@ Safe visual evidence for README / demos.
 | `08-stripe-webhook.png` | Stripe event / attempts / effects |
 | `09-stripe-failed-queue.png` | Failed/retry queue (if exercised) |
 
-Screenshots are added after real external acceptance; placeholders are not claimed as verification.
+Screenshots committed after the Oct 2026 external-acceptance run (Compose on
+`:8080`). Safe UI only — no operator keys, OAuth secrets, or `whsec_` values.

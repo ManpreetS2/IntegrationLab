@@ -157,9 +157,9 @@ Capture without secrets, operator key, cookies, or private paths:
 
 ## 6. After acceptance — docs to update
 
-- [ ] `docs/verification.md` — upgrade only proven rows
-- [ ] README verification section
-- [ ] `docs/demo-script.md` — use real story
-- [ ] Portfolio screenshots committed (safe only)
+- [x] `docs/verification.md` — upgrade only proven rows
+- [x] README verification section
+- [x] `docs/demo-script.md` — use real story
+- [x] Portfolio screenshots committed (safe only) — `docs/assets/portfolio/`
 
 AWS `terraform apply` is **out of scope** for this runbook.

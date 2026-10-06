@@ -113,7 +113,13 @@ Claim → evidence matrix: [docs/verification.md](docs/verification.md).
 | **Locally verified** | Ran on a developer machine |
 | **Externally verified** | Real provider/cloud step succeeded |
 
-AWS apply, real GitHub OAuth, and Stripe CLI delivery are only **Externally verified** after they are actually run. See [docs/external-acceptance.md](docs/external-acceptance.md).
+AWS `terraform apply` remains **not Externally verified** (cost-gated). GitHub OAuth,
+real `GET /user`, revoke/reconnect, Stripe CLI signed delivery + duplicate absorption +
+failed-queue evidence, and a support case from real evidence are **Externally verified**
+on Compose — see [docs/verification.md](docs/verification.md) and
+[docs/external-acceptance.md](docs/external-acceptance.md).
+
+Portfolio screenshots: [docs/assets/portfolio/](docs/assets/portfolio/).
 
 ## Engineering decisions worth discussing
 

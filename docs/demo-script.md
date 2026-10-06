@@ -2,8 +2,9 @@
 
 Audience: internship / Solutions Engineer interview.
 
-Use `make demo` for a deterministic simulated dataset, or the external-acceptance
-story once GitHub/Stripe are **Externally verified**.
+Prefer the **Externally verified** Compose story below when the local stack has
+real GitHub + Stripe evidence. Use `make demo` only when you need a deterministic
+SIMULATED dataset — and say so out loud.
 
 Always say when evidence is **SIMULATED**.
 
@@ -13,9 +14,9 @@ Always say when evidence is **SIMULATED**.
 
 1. **Problem (10s)** — “Partner integrations fail in ambiguous ways. Logs alone don’t give operators a recovery workflow.”
 2. **Overview (10s)** — `/#/overview`: health from stored evidence only; unknown ≠ healthy.
-3. **Evidence (15s)** — Failures or Requests: real vs SIMULATED; or a Stripe webhook detail with attempts/effects.
-4. **Support case (15s)** — Case → pinned evidence → note → status → timeline + correlation short-id.
-5. **Close (10s)** — “Built with FastAPI, React, Postgres, Docker, CI, and Terraform for AWS — with an honest verification matrix.”
+3. **Evidence (15s)** — Requests (real GitHub `/user`) or Webhooks (signed Stripe receipt, duplicate absorbed, failed queue).
+4. **Support case (15s)** — `CASE-00001` → pinned real evidence → note → status → timeline + correlation short-id.
+5. **Close (10s)** — “FastAPI, React, Postgres, Docker, CI, Terraform for AWS — with an honest verification matrix.”
 
 ---
 
@@ -27,29 +28,28 @@ Always say when evidence is **SIMULATED**.
 
 ### 2. GitHub path (60s)
 
-- Integration card: connection status ≠ reliability health.
-- Prefer **real** connected GitHub if externally verified; otherwise Failure Lab 401 labeled SIMULATED.
-- Diagnostics: persisted checks; optional real `GET /user`.
+- **GitHub Acceptance** connected as a real OAuth App (`read:user`).
+- Connection status ≠ reliability health (degraded can mean recent 401s after revoke drills).
+- Diagnostics: pass checklist + real `GET /user`.
+- Negative path: revoke → `github_unauthorized` (not “GitHub down”) → reconnect.
 
 ### 3. Stripe webhook reliability (90s)
 
-- Receipt first (signature on raw body) → 200 to Stripe.
-- Process → attempts append-only; effect once.
+- `stripe listen` → signature verified → durable receipt → HTTP 200.
+- Process → attempts append-only; `payment_success_recorded` once.
 - Duplicate delivery: `delivery_count`↑, still one effect.
-- Failed queue → retry/dismiss; mention intent audit **before** process.
+- Failed queue: invalid `data.object` → `webhook_invalid_event_data` (permanent).
+- Intent audit **before** process.
 
 ### 4. Support operations (60s)
 
-- Create case from evidence (safe title — no invented root cause).
-- Pin, note, status `investigating → identified → monitoring → resolved`.
-- Timeline: occurrence time vs pin time; Audit + correlation.
+- Case from real provider request + diagnostics + audit evidence.
+- Timeline mixes `occurred_at` vs `pinned_at`; correlation short-ids.
 
-### 5. Architecture / testing / tradeoff (60s)
+### 5. AWS architecture (30s)
 
-- Mermaid: Browser → nginx → FastAPI → Postgres; GitHub outbound; Stripe inbound.
-- CI: tests, containers, full-stack smoke, Terraform validate.
-- One hard tradeoff: PostgreSQL retry queue before Redis; or intent audit before multi-tx processor; or public Fargate without NAT for cost.
+- CloudFront → S3 + ALB → ECS/Fargate → private RDS; OIDC deploy; no apply claimed.
 
-### Closing line
+### 6. Close (30s)
 
-“IntegrationLab turns messy third-party failures into durable evidence, deterministic health, and a support workflow you can explain end-to-end.”
+- Honest limits: AWS not applied; background webhook worker still operator-triggered.
