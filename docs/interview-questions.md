@@ -128,8 +128,63 @@ adopting Jaeger/Tempo. ContextVar + UUID keeps it testable and secret-safe.
 Audit is for ACTIONS. Allowlists prevent tokens, Authorization headers, and raw
 webhook bodies from landing in an operator-readable trail.
 
+### Why did you build this?
+Partner integrations fail for many reasons; operators need durable evidence and
+a recovery workflow, not another uptime inventing dashboard.
+
+### Why not just use provider logs?
+Provider dashboards rarely join OAuth, outbound requests, inbound webhooks,
+retries, operator actions, and investigation state. IntegrationLab owns that
+join for one operator console.
+
+### Delivery dedupe vs idempotency?
+Dedupe: one logical webhook event row per provider event id (delivery_count↑).
+Idempotency: each business effect key applies at most once even if processing
+runs again after retry/manual reprocess.
+
+### Why PostgreSQL instead of Redis/Kafka?
+v1 needs relational integrity, `ON CONFLICT`, and one operational dependency.
+A queue product can come later; Postgres already stores events/attempts/effects.
+
+### How are webhook retries bounded?
+1s → 2s → 4s then failed queue. Attempts are append-only; operators retry/dismiss.
+
+### What if processing crashes mid-flight?
+Durable receipt already returned 200 to Stripe. Stale `processing` can be
+reclaimed; effects remain idempotent; history is preserved.
+
+### Why audit process intent before side effects?
+The processor uses multiple commits by design. Recording `*_requested` first is
+truthful even if processing later fails — and if that audit cannot persist, we
+do not start the processor.
+
+### How do simulations avoid corrupting health?
+`is_simulated=true` on Failure Lab / simulated request logs; live health rules
+exclude them. Support cases may pin simulations only when labeled.
+
+### What bug involved `/auth/operator`?
+The SPA nginx config must proxy `/auth/operator` to the API. If it falls through
+to `index.html`, the unlock screen breaks even when the API is healthy.
+
+### How would you scale this?
+Horizontal API tasks + SKIP LOCKED workers, private subnets/NAT or endpoints,
+Multi-AZ RDS, origin TLS, WAF/rate limits, real identity/RBAC, continuous
+webhook scheduler, then optional Redis/Kafka when Postgres queue limits show up.
+
+### What would you add next?
+See [phase-2-backlog.md](phase-2-backlog.md): Stripe reconciliation, config
+drift, provider status, dry-run recovery, support metrics — not more random UI.
+
+### What are the security limitations?
+Single-operator bearer (not SSO/RBAC), portfolio CloudFront→ALB HTTP, no WAF,
+no multi-tenant authorization. Documented in the threat model.
+
+### What did you deliberately NOT build?
+AI diagnosis, multi-tenancy, Redis/Kafka/Celery, Kubernetes, Slack/PagerDuty,
+auto `terraform apply`, and pretending AWS was deployed without apply.
+
 ### What remains missing?
-Real GitHub OAuth verification, real Stripe CLI through CloudFront, automated
-webhook worker, alerts, remote state bootstrap as default, custom domain/ACM,
-and actual `terraform apply` until the user accepts cost. Support Phase 2
-(Stripe recon, provider status, batch recovery, SLOs) is intentionally later.
+AWS apply/runtime until cost is accepted; a continuous webhook worker/scheduler;
+WAF/rate limiting; multi-user RBAC and multi-tenancy; alerts/custom domain for a
+stricter production posture. Phase 2 backlog items stay explicitly unimplemented.
+GitHub OAuth and Stripe CLI acceptance on Compose are already Externally verified.

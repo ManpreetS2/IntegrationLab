@@ -1,83 +1,56 @@
-# Demo Script (5–7 minutes)
+# Demo Script
 
 Audience: internship / Solutions Engineer interview.
 
-## 1. Overview dashboard (45s)
+Prefer the **Externally verified** Compose story below when the local stack has
+real GitHub + Stripe evidence. Use `make demo` only when you need a deterministic
+SIMULATED dataset — and say so out loud.
 
-Open `/#/overview`.
+Always say when evidence is **SIMULATED**.
 
-- Show health totals and the Database indicator.
-- Point out: "Derived from stored evidence only — no provider calls."
-- Mention states: healthy / degraded / failed / unknown / not_configured.
+---
 
-## 2. GitHub integration health (30s)
+## 60-second recruiter demo
 
-Open a GitHub card.
+1. **Problem (10s)** — “Partner integrations fail in ambiguous ways. Logs alone don’t give operators a recovery workflow.”
+2. **Overview (10s)** — `/#/overview`: health from stored evidence only; unknown ≠ healthy.
+3. **Evidence (15s)** — Requests (real GitHub `/user`) or Webhooks (signed Stripe receipt, duplicate absorbed, failed queue).
+4. **Support case (15s)** — `CASE-00001` → pinned real evidence → note → status → timeline + correlation short-id.
+5. **Close (10s)** — “FastAPI, React, Postgres, Docker, CI, Terraform for AWS — with an honest verification matrix.”
 
-- Connected vs not_configured vs unknown (no recent real requests).
-- Emphasize health ≠ `integrations.status`.
+---
 
-## 3. Failure Lab (45s)
+## 5-minute engineering walkthrough
 
-`/#/integrations` or Failures → Failure Lab.
+### 1. Overview (30s)
 
-- Run a simulated 401 or 429.
-- Show diagnosis + that simulations are labeled and excluded from live health.
+`/#/overview` — health totals, Database indicator, no surprise provider calls.
 
-## 4. Stripe webhook event (45s)
+### 2. GitHub path (60s)
 
-`/#/webhooks`.
+- **GitHub Acceptance** connected as a real OAuth App (`read:user`).
+- Connection status ≠ reliability health (degraded can mean recent 401s after revoke drills).
+- Diagnostics: pass checklist + real `GET /user`.
+- Negative path: revoke → `github_unauthorized` (not “GitHub down”) → reconnect.
 
-- Show a verified event (or explain local signed test path).
-- Point at processing status and attempt count.
+### 3. Stripe webhook reliability (90s)
 
-## 5. Duplicate delivery / idempotency (30s)
+- `stripe listen` → signature verified → durable receipt → HTTP 200.
+- Process → attempts append-only; `payment_success_recorded` once.
+- Duplicate delivery: `delivery_count`↑, still one effect.
+- Failed queue: invalid `data.object` → `webhook_invalid_event_data` (permanent / non-retryable classification).
+- Manual retry exists in product/CI; do not claim it was externally demonstrated unless you re-run that step.
+- Intent audit **before** process.
 
-- Same `provider_event_id` delivered twice → `delivery_count` increments.
-- No second effect row (effect-level idempotency).
+### 4. Support operations (60s)
 
-## 6. Retry timeline (45s)
+- Case from real provider request + diagnostics + audit evidence.
+- Timeline mixes `occurred_at` vs `pinned_at`; correlation short-ids.
 
-- Open event detail / attempts: 1s → 2s → 4s.
-- Explain durable receipt first, then internal retry.
+### 5. AWS architecture (30s)
 
-## 7. Failed queue (30s)
+- CloudFront → S3 + ALB → ECS/Fargate → private RDS; OIDC deploy; no apply claimed.
 
-- Show a failed event → Retry / Dismiss.
-- Note reliability card becomes degraded when the queue is non-empty.
+### 6. Close (30s)
 
-## 8. Diagnostics (45s)
-
-`/#/diagnostics`.
-
-- Run Stripe diagnostics (no outbound Stripe API).
-- Show pass/warning/fail/unknown checks and persisted history.
-- Mention GitHub probe is the only optional real provider call.
-
-## 9. Support case from evidence (45s)
-
-From Failures → **Create Support Case** on a Failure Lab row (or open `/#/support`).
-
-- Show prefilled integration/environment and safe title (no invented root cause).
-- Pin evidence, add a short note, move status investigating → identified.
-- Open timeline: history + note + simulated pin labeled.
-- Mention `/#/audit` for the operator action trail and correlation IDs.
-
-## 10. AWS architecture (45s)
-
-Sketch or open docs diagram:
-
-CloudFront → S3 + ALB → Fargate → RDS; Secrets Manager; GitHub OIDC deploy.
-Mention: Terraform written; apply is user-controlled because of cost.
-
-## 11. Incident case study (60s)
-
-One-minute version of [customer-case-study.md](customer-case-study.md):
-
-delivery OK → processing failed → bounded retry → failed queue → fix →
-manual retry → effect once.
-
-## Closing line
-
-"IntegrationLab turns messy third-party failures into durable evidence,
-deterministic health, and a recovery workflow you can demo end-to-end."
+- Honest limits: AWS not applied; background webhook worker still operator-triggered.

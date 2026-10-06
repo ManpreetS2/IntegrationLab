@@ -1,4 +1,4 @@
-# Full local container stack (production-like).
+# Full local container stack (Compose packaging; not AWS production mode).
 #
 # Usage:
 #   docker compose -f docker-compose.full.yml up --build
@@ -39,7 +39,9 @@ services:
       dockerfile: backend/Dockerfile
     container_name: integrationlab-full-migrate
     environment:
-      APP_ENV: production
+      # Local Compose defaults to development so short demo operator keys work.
+      # Production AWS still uses APP_ENV=production (≥24-char key required).
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@postgres:5432/integrationlab
       OPERATOR_API_KEY: ${OPERATOR_API_KEY:-local-demo-operator-key-change-me}
     depends_on:
@@ -55,13 +57,20 @@ services:
       dockerfile: backend/Dockerfile
     container_name: integrationlab-full-backend
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-development}
       APP_VERSION: local-compose
       DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@postgres:5432/integrationlab
       OPERATOR_API_KEY: ${OPERATOR_API_KEY:-local-demo-operator-key-change-me}
       FRONTEND_URL: http://localhost:8080
       GITHUB_OAUTH_REDIRECT_URI: http://localhost:8080/api/oauth/github/callback
       CORS_ORIGINS: '["http://localhost:8080"]'
+      # Real provider acceptance — supply via shell env or a local `.env` next to
+      # this compose file (never commit real values). OAuth/webhook routes return
+      # clear 503s when these are unset.
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

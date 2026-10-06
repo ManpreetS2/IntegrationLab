@@ -47,7 +47,7 @@ The Docker smoke path removes its temporary Compose volume when it finishes.
 make demo
 ```
 
-This starts the production-like local stack and populates:
+This starts the full local Compose stack and populates:
 
 - a GitHub demo integration
 - a Stripe demo integration
@@ -58,19 +58,31 @@ Failure Lab rows remain explicitly `is_simulated=true`. The demo script does
 **not** forge signed Stripe deliveries and does not claim a real GitHub OAuth
 connection.
 
-## Still requires real external acceptance
+## External / provider acceptance matrix
 
-These cannot be proven by repository CI alone:
+Update rows only after the matching step in
+[external-acceptance.md](external-acceptance.md) succeeds.
 
-- Terraform `apply` in a user-controlled AWS account
-- CloudFront → ALB → ECS → RDS runtime acceptance
-- GitHub OAuth authorize/callback with a real OAuth App
-- a real Stripe CLI signed webhook through the deployed CloudFront URL
-- CloudWatch inspection after a real task runs
-- screenshots of the final deployed console
+| Claim | Status |
+|---|---|
+| GitHub OAuth authorize/callback + PKCE + encrypted token | **Externally verified** (Compose `:8080`, OAuth App `IntegrationLab Local`) |
+| Real GitHub `GET /user` provider request (`is_simulated=false`) | **Externally verified** |
+| GitHub OAuth deny/cancel or revocation negative path | **Externally verified** — cancel callback (`status=cancelled`, no credential leak) + revoke → `github_unauthorized` / diagnostics auth fail → reconnect |
+| Stripe CLI signed webhook → durable receipt | **Externally verified** (`stripe listen` → HTTP 200, `signature_verified=true`) |
+| Stripe process + effect + process intent audit | **Externally verified** (`payment_success_recorded` + `webhook_process_*` audit) |
+| Stripe duplicate delivery (`delivery_count` + one effect) | **Externally verified** (`delivery_count=2`, one effect; `duplicate_deliveries=1`) |
+| Stripe failed queue + failure classification | **Externally verified** — signed invalid `data.object` → `webhook_invalid_event_data` → failed queue (permanent / non-retryable) |
+| Stripe manual retry / dismiss of failed events | Implemented · CI verified · **not Externally verified** (external run used a permanent failure; manual retry was not exercised) |
+| Support case from real provider evidence | **Externally verified** — `CASE-00001` with pinned real request + diagnostics + audit |
+| Local Compose full stack boot | **Locally verified** |
+| Terraform AWS topology | Implemented · CI `fmt`/`validate` · **not Externally verified** (no apply) |
+| CloudFront → ALB → ECS → RDS runtime | Implemented · **not Externally verified** |
 
-Until those happen, documentation must continue saying they are **not
-externally verified**.
+## Still requires user-controlled external systems
+
+- Optional later: `terraform apply` + CloudFront runtime (cost approval)
+
+GitHub OAuth App credentials, Stripe CLI login, and Compose boot were completed for the portfolio acceptance run documented above.
 
 ## Rule for portfolio claims
 

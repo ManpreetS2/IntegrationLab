@@ -30,11 +30,13 @@ TEST_DATABASE_URL = os.environ.get(
 os.environ.setdefault("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("GITHUB_CLIENT_ID", "test-github-client-id")
 os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-github-client-secret")
-os.environ.setdefault(
-    "GITHUB_OAUTH_REDIRECT_URI",
-    "http://localhost:8000/api/oauth/github/callback",
+# Force test URLs even if a developer shell exported Compose acceptance values.
+os.environ["GITHUB_OAUTH_REDIRECT_URI"] = (
+    "http://localhost:8000/api/oauth/github/callback"
 )
-os.environ.setdefault("FRONTEND_URL", "http://localhost:5173")
+os.environ["FRONTEND_URL"] = "http://localhost:5173"
+# Operator auth is covered by dedicated tests; default suite stays open.
+os.environ.pop("OPERATOR_API_KEY", None)
 # Obviously fake webhook secret; tests sign payloads with it locally.
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_example")
 

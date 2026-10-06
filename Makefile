@@ -6,7 +6,7 @@ OPERATOR_API_KEY ?= local-demo-operator-key-change-me
 help:
 	@printf '%s\n' \
 	  'IntegrationLab developer targets:' \
-	  '  make compose-up      Build/start the production-like local stack' \
+	  '  make compose-up      Build/start the full local Compose stack' \
 	  '  make smoke           Boot the stack and run end-to-end smoke checks' \
 	  '  make demo            Start the stack and populate deterministic demo data' \
 	  '  make compose-down    Stop stack and remove local Compose volumes' \
