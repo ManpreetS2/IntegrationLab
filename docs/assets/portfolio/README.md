@@ -25,3 +25,6 @@ Safe visual evidence for README / demos.
 
 Screenshots committed after the Oct 2026 external-acceptance run (Compose on
 `:8080`). Safe UI only — no operator keys, OAuth secrets, or `whsec_` values.
+
+LinkedIn carousel selection (ordered, with live/simulated provenance):
+[`linkedin/`](./linkedin/).
