@@ -219,7 +219,10 @@ cd backend && pytest tests/test_stripe_webhook_receipt.py tests/test_webhook_pro
 
 ```bash
 stripe login
-stripe listen --forward-to localhost:8000/webhooks/stripe/<stripe-integration-id>
+# Prefer the Compose nginx entrypoint (localhost-only bind):
+stripe listen --forward-to localhost:8080/webhooks/stripe/<stripe-integration-id>
+# Or forward directly to the API container:
+# stripe listen --forward-to localhost:8000/webhooks/stripe/<stripe-integration-id>
 # copy the printed whsec_... into backend/.env as STRIPE_WEBHOOK_SECRET, restart uvicorn
 
 stripe trigger payment_intent.succeeded
@@ -237,14 +240,35 @@ Stripe CLI is not installed on the development machine. Verification so far
 uses locally signed payloads with a fake secret, through the real HTTP
 endpoint and the official SDK verifier.
 
+## Idempotency guarantees (v1)
+
+Two different mechanisms — do not collapse them:
+
+| Concern | Mechanism | Unique key |
+|---------|-----------|------------|
+| **Delivery dedupe** | Receipt path | `(integration_id, provider, provider_event_id)` — redeliveries increment `delivery_count` |
+| **Business-effect idempotency** | Processor path | `effect_key = "{provider}:{provider_event_id}:{effect_type}"` per event row |
+
+Supported:
+
+- Same Stripe event id redelivered → one logical row, `delivery_count` grows, effect stays at 1
+- Distinct event ids that share a provider object (e.g. two `charge.refunded` events on the same charge) → **two** effects (legitimate separate operations)
+- Manual retry after a permanent failure opens a new attempt cycle; effect insert remains idempotent via `effect_key`
+- Concurrent workers: `SELECT … FOR UPDATE SKIP LOCKED` skips a locked row; claim races do not double-apply effects
+
+Not supported / not claimed:
+
+- Deduplicating “the same business meaning” across different Stripe event ids by object id alone (that would discard legitimate refunds)
+- Cross-integration dedupe of the same Stripe event id
+
 ## Known limitations
 
-- One global `STRIPE_WEBHOOK_SECRET` shared by all Stripe integrations; per-integration secrets would need encrypted storage.
+- **One global `STRIPE_WEBHOOK_SECRET`** for the whole process. The URL path chooses which Stripe *integration record* stores the receipt (`/webhooks/stripe/{integration_id}`), but signature verification uses the single env secret. For the single-operator local/demo scope that is intentional. If two Stripe integration rows exist, a correctly signed payload posted to the “wrong” integration URL is still accepted and attributed to that URL’s integration. Per-integration secrets would need encrypted credential storage (out of v1 scope).
 - Processing is triggered by the CLI / button, not by a daemon.
 - Stale `processing` recovery waits a fixed 5 minutes.
 - Effects are internal records only; there's no ledger or order system behind them yet.
-- No app authentication on operator endpoints.
 - Secret rotation (two active secrets) is not supported yet.
+- Amounts are stored as Stripe integer minor units; operator UI formatting respects zero-decimal currencies (e.g. JPY).
 
 ---
 

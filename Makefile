@@ -34,7 +34,7 @@ backend-test:
 	cd backend && pytest -q
 
 frontend-check:
-	cd frontend && npm run lint && VITE_API_URL= npm run build
+	cd frontend && npm run lint && npm run test:unit && VITE_API_URL= npm run build
 
 terraform-check:
 	cd infra/terraform && terraform fmt -check -recursive && terraform init -backend=false && terraform validate

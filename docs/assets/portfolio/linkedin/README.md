@@ -31,6 +31,7 @@ Do **not** claim AWS deployment, production customer metrics, a new Stripe CLI r
 
 - Typography readable at LinkedIn carousel size; no credential overlays.
 - Support-case `[SIMULATED]` labels retained and visible; impact text states operator exercise / not a live outage.
-- Stripe #4 uses the webhook **list** (processed filter) so the Object/Amount detail-grid collision is not shown.
+- Stripe #4 uses the webhook **list** (processed filter). The Object/Amount detail-grid collision was a real CSS bug and is fixed in product CSS (`webhook-detail-grid` + `min-width: 0` / overflow wrapping) — re-verify detail view after that fix rather than relying on list-only framing.
 - GitHub #2 focuses on the primary Developer Integration card without repeated acceptance/deny rows.
 - Secret string scan of PNGs: no `whsec_`, `Bearer `, or operator/OAuth secret markers.
+- Carousel images #3–#5 from the LinkedIn staging session use Failure Lab **SIMULATED** evidence and/or locally HMAC-signed Stripe demo events — not a fresh Stripe CLI push. #1–#2 reuse prior acceptance captures (see table).

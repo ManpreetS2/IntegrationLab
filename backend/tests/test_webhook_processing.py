@@ -295,6 +295,43 @@ def test_event_ordering_is_not_assumed(db_session, stripe_integration_id):
     assert _reload(db_session, success.id).processing_status == "processed"
 
 
+def test_distinct_event_ids_same_object_record_separate_effects(db_session, stripe_integration_id):
+    """Business idempotency is per Stripe event id — not per provider object.
+
+    Two charge.refunded deliveries with different evt_ ids for the same charge
+    must each apply once. Collapsing by object id would drop legitimate refunds.
+    """
+    first = store_event(
+        db_session,
+        stripe_integration_id,
+        event_type="charge.refunded",
+        event_id="evt_refund_a",
+        object_id="ch_shared",
+        now=T0,
+    )
+    second = store_event(
+        db_session,
+        stripe_integration_id,
+        event_type="charge.refunded",
+        event_id="evt_refund_b",
+        object_id="ch_shared",
+        now=T0 + timedelta(seconds=1),
+    )
+
+    counts = StripeWebhookProcessor().process_due(db_session, now=T0 + timedelta(seconds=2))
+
+    assert counts.processed == 2
+    effects_a = _effects(db_session, first.id)
+    effects_b = _effects(db_session, second.id)
+    assert len(effects_a) == 1
+    assert len(effects_b) == 1
+    assert effects_a[0].effect_key != effects_b[0].effect_key
+    assert effects_a[0].effect_key == build_effect_key(first, "refund_recorded")
+    assert effects_b[0].effect_key == build_effect_key(second, "refund_recorded")
+    assert "ch_shared" in effects_a[0].summary
+    assert "ch_shared" in effects_b[0].summary
+
+
 def test_locked_event_is_skipped(db_session, TestingSessionLocal, stripe_integration_id):
     event = store_event(db_session, stripe_integration_id, now=T0)
     other = TestingSessionLocal()
