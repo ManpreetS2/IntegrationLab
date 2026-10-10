@@ -138,8 +138,12 @@ ADRs: [docs/adr/](docs/adr/).
 
 ```bash
 cp .env.example .env   # then fill secrets (see docs/external-acceptance.md)
+# With real GitHub/Stripe credentials, set a generated operator key (do not commit it):
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+#   export OPERATOR_API_KEY=...
 make compose-up
-# UI http://localhost:8080  — unlock with OPERATOR_API_KEY
+# UI http://127.0.0.1:8080  — unlock with OPERATOR_API_KEY
+# Compose publishes frontend/API on loopback only (safe for LAN); OAuth + Stripe CLI use localhost.
 make demo              # optional simulated dataset
 ```
 
@@ -156,6 +160,7 @@ Terraform under `infra/terraform` defines the portfolio topology. Cost-conscious
 - Single-operator access (no SSO/RBAC/multi-tenancy)
 - No WAF / application rate limiter in the default stack
 - Webhook processing is operator/CLI-triggered (no always-on worker by default)
+- One process-wide `STRIPE_WEBHOOK_SECRET` (URL picks the integration row; not per-endpoint secrets in v1)
 - No Stripe Events reconciliation, provider-status correlation, or batch recovery yet ([Phase 2 backlog](docs/phase-2-backlog.md))
 - CloudFront→ALB HTTP in the portfolio design (viewer HTTPS); real sensitive use needs origin TLS
 - AWS stack is implemented + CI-validated, not automatically applied

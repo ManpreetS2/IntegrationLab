@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.db.models.webhook import WebhookEventORM
+from app.services.stripe_money import format_stripe_amount
 
 
 class WebhookProcessingError(Exception):
@@ -46,7 +47,12 @@ EventHandler = Callable[[WebhookEventORM], EffectSpec]
 
 
 def build_effect_key(event: WebhookEventORM, effect_type: str) -> str:
-    """Deterministic effect identity for one event — replays map to the same key."""
+    """Deterministic effect identity for one Stripe *event id* + effect type.
+
+    Delivery dedupe is separate (unique on integration/provider/event id).
+    This key intentionally does **not** collapse distinct event ids that share
+    a provider object — e.g. two refunds on the same charge remain distinct.
+    """
     return f"{event.provider}:{event.provider_event_id}:{effect_type}"
 
 
@@ -60,9 +66,10 @@ def _require_object_id(event: WebhookEventORM) -> str:
 
 
 def _money(event: WebhookEventORM) -> str:
-    if event.amount is None or event.currency is None:
+    formatted = format_stripe_amount(event.amount, event.currency)
+    if formatted == "—":
         return "amount unavailable"
-    return f"{event.amount} {event.currency}"
+    return formatted
 
 
 def handle_payment_intent_succeeded(event: WebhookEventORM) -> EffectSpec:

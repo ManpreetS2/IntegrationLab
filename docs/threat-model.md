@@ -43,6 +43,8 @@ GitHub Actions
 | OAuth CSRF / callback replay | State + PKCE; state is expiring, single-use, and validated before callback handling |
 | OAuth token stolen from DB | Token encrypted with Fernet before persistence |
 | Forged Stripe webhook | Signature verified against the exact raw request body before durable receipt |
+| Local Compose ports exposed on LAN | `docker-compose.full.yml` binds frontend/API to `127.0.0.1` only |
+| Signed Stripe event posted to wrong integration URL | v1 uses one process-wide `STRIPE_WEBHOOK_SECRET`; URL selects the integration row (documented single-operator limit) |
 | Stripe/provider duplicate delivery | Provider-event dedupe + effect-level idempotency |
 | Poison event retries forever | Bounded retry policy, failed queue, manual retry/dismiss |
 | Concurrent workers process same event | PostgreSQL row locking with `FOR UPDATE SKIP LOCKED` |

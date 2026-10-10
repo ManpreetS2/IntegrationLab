@@ -23,7 +23,7 @@ Never mark a claim **Externally verified** unless the provider step actually ran
 | `main` SHA baseline | Contains support-operations foundation (PR #14) |
 | Docker / Compose | `docker compose version` works |
 | Local secrets file | Project-root `.env` and/or `backend/.env` (gitignored) |
-| Operator key | `OPERATOR_API_KEY` ≥ 24 chars |
+| Operator key | Prefer a generated `OPERATOR_API_KEY` (`secrets.token_urlsafe(32)`). Compose has a documented demo default; override it before real provider credentials. |
 | Token cipher | `TOKEN_ENCRYPTION_KEY` (Fernet) |
 | GitHub OAuth App | Client ID + secret |
 | Stripe CLI | Installed + `stripe login` (test mode) |

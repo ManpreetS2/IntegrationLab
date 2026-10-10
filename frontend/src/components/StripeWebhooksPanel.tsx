@@ -10,6 +10,7 @@ import {
   processWebhookEvent,
   retryWebhookEvent,
 } from '../api'
+import { formatStripeAmount } from '../lib/stripeAmount'
 import type {
   Integration,
   WebhookEventDetail,
@@ -34,11 +35,6 @@ const STATUS_OPTIONS: WebhookProcessingStatus[] = [
 
 function formatTime(value: string | null): string {
   return value ? new Date(value).toLocaleString() : '—'
-}
-
-function formatAmount(amount: number | null, currency: string | null): string {
-  if (amount === null || currency === null) return '—'
-  return `${(amount / 100).toFixed(2)} ${currency.toUpperCase()}`
 }
 
 function statusLabel(status: string): string {
@@ -310,7 +306,7 @@ function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
             </div>
             <div>
               <dt>Amount</dt>
-              <dd>{formatAmount(selected.amount, selected.currency)}</dd>
+              <dd>{formatStripeAmount(selected.amount, selected.currency)}</dd>
             </div>
             <div>
               <dt>Mode</dt>

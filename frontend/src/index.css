@@ -463,6 +463,7 @@ button:disabled {
 .result-grid div {
   display: grid;
   gap: 0.15rem;
+  min-width: 0;
 }
 
 .result-grid dt {
@@ -472,6 +473,8 @@ button:disabled {
 
 .result-grid dd {
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .failure-diagnosis ul {
@@ -581,7 +584,12 @@ button:disabled {
 }
 
 .webhook-detail-grid {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  /* minmax + min-width:0 prevents long object IDs from colliding with Amount */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.5rem), 1fr));
+}
+
+.webhook-detail-grid dd {
+  font-variant-numeric: tabular-nums;
 }
 
 .webhook-effects,
