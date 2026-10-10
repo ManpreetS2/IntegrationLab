@@ -79,6 +79,20 @@ def test_window_filtering(client, db_session) -> None:
     assert _github_metrics(client, window_hours=1)["request_count"] == 0
 
 
+def test_latest_request_uses_distinct_on_newest_row(client, db_session) -> None:
+    """SQLAlchemy 2.1 DISTINCT ON must keep the newest real request per integration."""
+    gh = github_integration(db_session)
+    older = utcnow() - timedelta(minutes=10)
+    newer = utcnow() - timedelta(minutes=1)
+    add_log(db_session, gh.id, latency_ms=111, status_code=200, rate_limit_remaining=10, at=older)
+    add_log(db_session, gh.id, latency_ms=222, status_code=503, error="github_server_error", rate_limit_remaining=9, at=newer)
+    metrics = _github_metrics(client)
+    assert metrics["latest_latency_ms"] == 222
+    assert metrics["latest_status_code"] == 503
+    assert metrics["latest_error_code"] == "github_server_error"
+    assert metrics["rate_limit_remaining"] == 9
+
+
 def test_rate_limit_remaining_reported(client, db_session) -> None:
     gh = github_integration(db_session)
     connect_github_directly(db_session, gh.id)
