@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from app.db.models.diagnostics import DiagnosticCheckORM, DiagnosticRunORM
@@ -162,7 +163,7 @@ class ReliabilityRepository:
                     is_simulated=is_simulated,
                 )
             )
-            .distinct(Log.integration_id)
+            .ext(distinct_on(Log.integration_id))
             .order_by(Log.integration_id, Log.timestamp.desc(), Log.id.desc())
         )
         return {
@@ -188,7 +189,7 @@ class ReliabilityRepository:
                 Log.is_simulated.is_(False),
                 Log.rate_limit_remaining.is_not(None),
             )
-            .distinct(Log.integration_id)
+            .ext(distinct_on(Log.integration_id))
             .order_by(Log.integration_id, Log.timestamp.desc())
         )
         return {key: int(value) for key, value in session.execute(statement).all()}
@@ -354,7 +355,7 @@ class ReliabilityRepository:
     def latest_diagnostic_runs(self, session: Session) -> dict[UUID, DiagnosticRunORM]:
         statement = (
             select(DiagnosticRunORM)
-            .distinct(DiagnosticRunORM.integration_id)
+            .ext(distinct_on(DiagnosticRunORM.integration_id))
             .order_by(DiagnosticRunORM.integration_id, DiagnosticRunORM.started_at.desc())
         )
         return {run.integration_id: run for run in session.scalars(statement).all()}
@@ -399,7 +400,7 @@ class ReliabilityRepository:
         first_fail = (
             select(DiagnosticCheckORM)
             .where(DiagnosticCheckORM.status == "fail")
-            .distinct(DiagnosticCheckORM.diagnostic_run_id)
+            .ext(distinct_on(DiagnosticCheckORM.diagnostic_run_id))
             .order_by(DiagnosticCheckORM.diagnostic_run_id, DiagnosticCheckORM.position)
             .subquery()
         )
