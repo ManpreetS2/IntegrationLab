@@ -3,7 +3,7 @@ import { getRequestMetrics, listProviderRequests } from '../api'
 import ProviderRequestsTable from '../components/ProviderRequestsTable'
 import SectionStatus from '../components/SectionStatus'
 import { formatCount, formatMs } from '../format'
-import { useResource } from '../hooks'
+import { pageHref, useResource } from '../hooks'
 import type { Integration } from '../types'
 
 type SourceFilter = 'real' | 'simulated' | 'all'
@@ -53,6 +53,10 @@ function RequestsPage({ integrations }: { integrations: Integration[] }) {
 
   return (
     <>
+      <p className="muted small-text">
+        This log is independently recorded provider traffic. SDK-reported observations stay on{' '}
+        <a href={pageHref('telemetry')}>Telemetry</a>.
+      </p>
       <section className="panel">
         <div className="webhook-toolbar">
           <label>
@@ -75,7 +79,9 @@ function RequestsPage({ integrations }: { integrations: Integration[] }) {
             Integration
             <select value={integrationId} onChange={(e) => setIntegrationId(e.target.value)}>
               <option value="">All</option>
-              {integrations.map((item) => (
+              {integrations
+                .filter((item) => item.provider !== 'instrumented_http')
+                .map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name} ({item.provider})
                 </option>

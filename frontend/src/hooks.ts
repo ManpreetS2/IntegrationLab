@@ -5,6 +5,7 @@ export type Page =
   | 'overview'
   | 'integrations'
   | 'requests'
+  | 'telemetry'
   | 'webhooks'
   | 'failures'
   | 'diagnostics'
@@ -15,6 +16,7 @@ export const PAGES: { id: Page; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'requests', label: 'Requests' },
+  { id: 'telemetry', label: 'Telemetry' },
   { id: 'webhooks', label: 'Webhooks' },
   { id: 'failures', label: 'Failures' },
   { id: 'diagnostics', label: 'Diagnostics' },
@@ -31,12 +33,17 @@ export const PAGE_META: Record<Page, { label: string; title: string; description
   integrations: {
     label: 'Integrations',
     title: 'Integrations',
-    description: 'Connect GitHub and Stripe providers. Secrets stay on the server; the console shows status only.',
+    description: 'Register GitHub, Stripe, and instrumented applications. Ingestion secrets are shown once and never stored in the browser.',
   },
   requests: {
     label: 'Requests',
     title: 'Requests',
-    description: 'Inspect provider API calls — real traffic versus Failure Lab simulations.',
+    description: 'Inspect provider API calls — real traffic versus Failure Lab simulations. SDK-reported observations are on Telemetry.',
+  },
+  telemetry: {
+    label: 'Telemetry',
+    title: 'Telemetry',
+    description: 'SDK-reported HTTP outcomes. IntegrationLab did not call the upstream service.',
   },
   webhooks: {
     label: 'Webhooks',
@@ -67,7 +74,7 @@ export const PAGE_META: Record<Page, { label: string; title: string; description
 
 export const NAV_GROUPS: { label: string; pages: Page[] }[] = [
   { label: 'Monitor', pages: ['overview', 'integrations'] },
-  { label: 'Investigate', pages: ['requests', 'webhooks', 'failures'] },
+  { label: 'Investigate', pages: ['requests', 'telemetry', 'webhooks', 'failures'] },
   { label: 'Resolve', pages: ['diagnostics', 'support', 'audit'] },
 ]
 

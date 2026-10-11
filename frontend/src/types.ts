@@ -1,8 +1,13 @@
 /** Shared TypeScript types for IntegrationLab API responses. */
 
-export type IntegrationStatus = 'not_connected' | 'connected' | 'needs_setup'
+export type IntegrationStatus =
+  | 'not_connected'
+  | 'connected'
+  | 'needs_setup'
+  | 'registered'
+  | 'instrumented'
 
-export type IntegrationProvider = 'github' | 'stripe'
+export type IntegrationProvider = 'github' | 'stripe' | 'instrumented_http'
 
 export type FailureScenarioId =
   | 'unauthorized_401'
@@ -309,7 +314,21 @@ export type HealthState = 'healthy' | 'degraded' | 'failed' | 'unknown' | 'not_c
 
 export type LatencyBand = 'normal' | 'elevated' | 'slow'
 
-export type FailureSource = 'provider_request' | 'webhook_processing' | 'failure_lab' | 'diagnostic'
+export type FailureSource =
+  | 'provider_request'
+  | 'webhook_processing'
+  | 'failure_lab'
+  | 'diagnostic'
+  | 'sdk_telemetry'
+
+export type TelemetryErrorCategory =
+  | 'http_client_error'
+  | 'http_server_error'
+  | 'rate_limited'
+  | 'timeout'
+  | 'transport_error'
+
+export type TelemetryProvenance = 'sdk_reported'
 
 export type Severity = 'info' | 'warning' | 'error' | 'critical'
 
@@ -349,6 +368,95 @@ export interface WebhookMetrics {
   last_received_at: string | null
 }
 
+export interface TelemetryFailureCategory {
+  category: TelemetryErrorCategory | string
+  count: number
+}
+
+/** Aggregates of SDK-reported observations. Not an independently verified SLA. */
+export interface TelemetryObservationMetrics {
+  request_count: number
+  success_count: number
+  error_count: number
+  error_rate: number | null
+  sample_count: number
+  average_latency_ms: number | null
+  p95_latency_ms: number | null
+  latest_occurred_at: string | null
+  latest_status_code: number | null
+  latest_error_category: TelemetryErrorCategory | string | null
+  latest_duration_ms: number | null
+  latest_route_template: string | null
+  latest_service: string | null
+  failure_categories: TelemetryFailureCategory[]
+  provenance: TelemetryProvenance
+  independently_verified: false
+}
+
+export interface TelemetryEvent {
+  event_id: string
+  integration_id: string
+  occurred_at: string
+  received_at: string
+  kind: 'http_observation'
+  service: string
+  method: string
+  route_template: string
+  status_code: number | null
+  duration_ms: number
+  error_category: TelemetryErrorCategory | string | null
+  environment: Environment
+  provenance: TelemetryProvenance
+  sdk_name: string | null
+  sdk_version: string | null
+  credential_id: string | null
+}
+
+export interface TelemetryEventPage {
+  items: TelemetryEvent[]
+  next_cursor: string | null
+}
+
+export interface InstrumentedHealth {
+  integration_id: string
+  name: string
+  provider: 'instrumented_http'
+  connection_status: IntegrationStatus
+  configuration: string
+  health: HealthState
+  summary: string
+  evidence: string[]
+  recommended_action: string | null
+  last_activity_at: string | null
+  window_hours: number
+  window_started_at: string
+  generated_at: string
+  provenance: TelemetryProvenance
+  independently_verified: false
+  metrics: TelemetryObservationMetrics
+}
+
+export interface IngestionCredentialView {
+  id: string
+  integration_id: string
+  label: string | null
+  key_prefix: string
+  created_at: string
+  revoked_at: string | null
+  last_used_at: string | null
+  rotated_from_id: string | null
+}
+
+/** Present only in the create or rotate response. Never store this value. */
+export interface IngestionCredentialCreated {
+  id: string
+  integration_id: string
+  label: string | null
+  key_prefix: string
+  credential: string
+  created_at: string
+}
+
 export interface DiagnosticRunBrief {
   id: string
   overall_status: DiagnosticRunStatus
@@ -371,6 +479,7 @@ export interface IntegrationHealth {
   last_checked_at: string | null
   request_metrics: RequestMetrics | null
   webhook_metrics: WebhookMetrics | null
+  telemetry_metrics: TelemetryObservationMetrics | null
   latest_diagnostic: DiagnosticRunBrief | null
 }
 
@@ -393,6 +502,8 @@ export interface OperationalMetrics {
   webhook_failed: number
   webhook_pending: number
   diagnostic_runs: number
+  sdk_reported_observations: number
+  sdk_reported_errors: number
 }
 
 export interface FailureItem {
@@ -406,6 +517,9 @@ export interface FailureItem {
   code: string
   summary: string
   simulated: boolean
+  provenance: TelemetryProvenance | null
+  service: string | null
+  error_category: TelemetryErrorCategory | string | null
   method: string | null
   endpoint: string | null
   status_code: number | null
@@ -433,6 +547,7 @@ export interface IntegrationReliabilityDetail extends IntegrationHealth {
   window_hours: number
   recent_requests: ProviderRequestLog[]
   recent_webhook_events: WebhookEventSummary[]
+  recent_telemetry_events: TelemetryEvent[]
   recent_failures: FailureItem[]
 }
 

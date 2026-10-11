@@ -4,7 +4,7 @@ import FailuresTable from '../components/FailuresTable'
 import { HealthBadge } from '../components/StatusBadges'
 import IntegrationHealthCard from '../components/IntegrationHealthCard'
 import SectionStatus from '../components/SectionStatus'
-import { formatCount, formatTime } from '../format'
+import { formatCount, formatProvider, formatTime } from '../format'
 import { pageHref, useResource } from '../hooks'
 import type { HealthState, IntegrationHealth, OperationalMetrics } from '../types'
 
@@ -21,7 +21,7 @@ function loadOverview() {
   return getReliabilityOverview(24)
 }
 
-const ALERT_LABELS = new Set(['Real provider errors', 'Failed'])
+const ALERT_LABELS = new Set(['Real provider errors', 'Failed', 'SDK-reported errors'])
 
 function metricClass(label: string, value: number): string | undefined {
   if (ALERT_LABELS.has(label) && value > 0) return 'is-alert'
@@ -48,6 +48,10 @@ function OperationalGrid({ metrics, windowHours }: { metrics: OperationalMetrics
     ['Duplicate deliveries absorbed', metrics.duplicate_webhook_deliveries],
     ['Diagnostic runs', metrics.diagnostic_runs],
   ]
+  const sdk: [string, number][] = [
+    ['SDK-reported observations', metrics.sdk_reported_observations ?? 0],
+    ['SDK-reported errors', metrics.sdk_reported_errors ?? 0],
+  ]
   const queue: [string, number][] = [
     ['Processed', metrics.webhook_processed],
     ['Pending', metrics.webhook_pending],
@@ -60,6 +64,18 @@ function OperationalGrid({ metrics, windowHours }: { metrics: OperationalMetrics
         <h3 className="group-title">Last {windowHours}h</h3>
         <dl className="metric-list">
           {windowed.map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd className={metricClass(label, value)}>{formatCount(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+      <div>
+        <h3 className="group-title">SDK-reported, not verified</h3>
+        <p className="muted small-text">These counts are not included in real provider requests.</p>
+        <dl className="metric-list">
+          {sdk.map(([label, value]) => (
             <div key={label}>
               <dt>{label}</dt>
               <dd className={metricClass(label, value)}>{formatCount(value)}</dd>
@@ -111,10 +127,19 @@ function Attention({ items }: { items: IntegrationHealth[] }) {
               </span>
               <span className="health-row-copy">
                 <strong>{item.name}</strong>
-                <span>{item.summary}</span>
+                <span>
+                  {formatProvider(item.provider)} · {item.summary}
+                </span>
               </span>
               <HealthBadge state={item.health} />
-              <a className="button-link" href={pageHref('diagnostics', { integration: item.integration_id })}>
+              <a
+                className="button-link"
+                href={
+                  item.provider === 'instrumented_http'
+                    ? pageHref('telemetry', { integration: item.integration_id })
+                    : pageHref('diagnostics', { integration: item.integration_id })
+                }
+              >
                 Inspect
               </a>
             </div>

@@ -833,6 +833,16 @@ button:disabled {
   color: var(--color-ok);
 }
 
+.status-registered {
+  background: var(--color-neutral-soft);
+  color: var(--color-neutral);
+}
+
+.status-instrumented {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
 .log-status-ok {
   background: var(--color-ok-soft);
   color: var(--color-ok);
@@ -1135,7 +1145,7 @@ html[data-theme='dark'] .appearance-option.is-selected {
 
 .metric-groups {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
   gap: 1.5rem;
   margin-top: 0.75rem;
 }
@@ -1714,6 +1724,58 @@ html[data-theme='dark'] .appearance-option.is-selected {
     overflow: hidden;
     text-overflow: ellipsis;
   }
+}
+
+.secret-dialog {
+  width: min(36rem, calc(100vw - 2rem));
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-md);
+}
+
+.secret-dialog::backdrop {
+  background: rgba(20, 20, 22, 0.45);
+}
+
+.secret-dialog-body {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.25rem;
+}
+
+.secret-dialog-body input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.sdk-setup {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+
+.sdk-setup pre {
+  margin: 0;
+  overflow: auto;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: var(--color-canvas);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.mono-meta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.small-button {
+  min-height: 2rem;
+  padding: 0.25rem 0.7rem;
 }
 
 @media (prefers-reduced-motion: reduce) {

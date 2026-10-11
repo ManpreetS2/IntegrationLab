@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { formatCount, formatMs, formatTime } from '../format'
+import { formatCount, formatErrorRate, formatMs, formatP95, formatProvider, formatTime } from '../format'
 import { pageHref } from '../hooks'
 import type { IntegrationHealth, RequestMetrics, WebhookMetrics } from '../types'
 import { CheckBadge, HealthBadge } from './StatusBadges'
@@ -68,6 +68,35 @@ function StripeFacts({ metrics, windowHours }: { metrics: WebhookMetrics; window
   )
 }
 
+function TelemetryFacts({ item }: { item: IntegrationHealth }) {
+  const metrics = item.telemetry_metrics
+  if (!metrics) return null
+  return (
+    <dl className="fact-grid">
+      <div>
+        <dt>SDK observations</dt>
+        <dd>
+          {metrics.request_count === 0
+            ? 'None in this window'
+            : `${metrics.error_count} / ${metrics.request_count} errors`}
+        </dd>
+      </div>
+      <div>
+        <dt>Error rate</dt>
+        <dd>{formatErrorRate(metrics.error_rate)}</dd>
+      </div>
+      <div>
+        <dt>Average latency</dt>
+        <dd>{formatMs(metrics.average_latency_ms)}</dd>
+      </div>
+      <div>
+        <dt>p95 latency</dt>
+        <dd>{formatP95(metrics.p95_latency_ms, metrics.sample_count)}</dd>
+      </div>
+    </dl>
+  )
+}
+
 function IntegrationHealthCard({
   item,
   windowHours,
@@ -89,7 +118,7 @@ function IntegrationHealthCard({
         <span className="health-row-copy">
           <strong>{item.name}</strong>
           <span>
-            {item.provider} · {item.summary}
+            {formatProvider(item.provider)} · {item.summary}
           </span>
         </span>
         <HealthBadge state={item.health} />
@@ -98,6 +127,10 @@ function IntegrationHealthCard({
         <div className="health-row-detail">
           {item.request_metrics ? <GitHubFacts metrics={item.request_metrics} windowHours={windowHours} /> : null}
           {item.webhook_metrics ? <StripeFacts metrics={item.webhook_metrics} windowHours={windowHours} /> : null}
+          {item.telemetry_metrics ? <TelemetryFacts item={item} /> : null}
+          {item.provider === 'instrumented_http' ? (
+            <p className="muted small-text">SDK-reported. IntegrationLab did not call the upstream service.</p>
+          ) : null}
           {item.evidence.length > 0 ? (
             <ul className="evidence-list">
               {item.evidence.map((line) => (
@@ -111,18 +144,30 @@ function IntegrationHealthCard({
             </p>
           ) : null}
           <footer className="health-card-footer">
-            <span className="muted small-text">
-              Last diagnostic:{' '}
-              {item.latest_diagnostic ? (
-                <>
-                  <CheckBadge status={item.latest_diagnostic.overall_status} />{' '}
-                  {formatTime(item.latest_diagnostic.started_at)}
-                </>
-              ) : (
-                'never run'
-              )}
-            </span>
-            <a href={pageHref('diagnostics', { integration: item.integration_id })}>Open diagnostics</a>
+            {item.provider === 'instrumented_http' ? (
+              <span className="muted small-text">Diagnostics are not available for instrumented applications.</span>
+            ) : (
+              <span className="muted small-text">
+                Last diagnostic:{' '}
+                {item.latest_diagnostic ? (
+                  <>
+                    <CheckBadge status={item.latest_diagnostic.overall_status} />{' '}
+                    {formatTime(item.latest_diagnostic.started_at)}
+                  </>
+                ) : (
+                  'never run'
+                )}
+              </span>
+            )}
+            <a
+              href={
+                item.provider === 'instrumented_http'
+                  ? pageHref('telemetry', { integration: item.integration_id })
+                  : pageHref('diagnostics', { integration: item.integration_id })
+              }
+            >
+              {item.provider === 'instrumented_http' ? 'Open telemetry' : 'Open diagnostics'}
+            </a>
           </footer>
         </div>
       ) : null}

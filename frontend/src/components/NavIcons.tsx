@@ -40,6 +40,12 @@ export function NavIcon({ page }: { page: Page }) {
           <path d="M14 11a5 5 0 0 0-7.54-.54L4.54 12.4a5 5 0 0 0 7.07 7.07L13 18" />
         </Icon>
       )
+    case 'telemetry':
+      return (
+        <Icon>
+          <path d="M4 16h3l2-6 2 8 2-5h7" />
+        </Icon>
+      )
     case 'requests':
       return (
         <Icon>

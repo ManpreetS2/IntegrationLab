@@ -11,7 +11,8 @@ import IntegrationsPage from './pages/IntegrationsPage'
 import OverviewPage from './pages/OverviewPage'
 import RequestsPage from './pages/RequestsPage'
 import SupportCasesPage from './pages/SupportCasesPage'
-import type { IntegrationProvider } from './types'
+import TelemetryPage from './pages/TelemetryPage'
+import type { Environment, IntegrationProvider } from './types'
 
 const SYSTEM_POLL_MS = 30_000
 
@@ -59,8 +60,8 @@ function App() {
   const reloadIntegrations = integrations.reload
 
   const handleCreate = useCallback(
-    async (name: string, provider: IntegrationProvider) => {
-      await createIntegration({ name, provider })
+    async (name: string, provider: IntegrationProvider, environment?: Environment) => {
+      await createIntegration({ name, provider, environment })
       reloadIntegrations()
     },
     [reloadIntegrations],
@@ -96,6 +97,9 @@ function App() {
         <IntegrationsPage integrations={integrations} onCreate={handleCreate} />
       ) : null}
       {route.page === 'requests' ? <RequestsPage integrations={items} /> : null}
+      {route.page === 'telemetry' ? (
+        <TelemetryPage integrations={items} requestedIntegrationId={route.params.get('integration')} />
+      ) : null}
       {route.page === 'webhooks' ? (
         <section className="panel">
           <div className="panel-header">

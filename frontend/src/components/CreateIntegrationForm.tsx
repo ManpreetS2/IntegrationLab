@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import type { IntegrationProvider } from '../types'
+import type { Environment, IntegrationProvider } from '../types'
 
 interface CreateIntegrationFormProps {
-  onSubmit: (name: string, provider: IntegrationProvider) => Promise<void>
+  onSubmit: (name: string, provider: IntegrationProvider, environment?: Environment) => Promise<void>
   disabled?: boolean
 }
 
 function CreateIntegrationForm({ onSubmit, disabled = false }: CreateIntegrationFormProps) {
   const [name, setName] = useState('')
   const [provider, setProvider] = useState<IntegrationProvider>('github')
+  const [environment, setEnvironment] = useState<Environment>('local')
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -25,7 +26,7 @@ function CreateIntegrationForm({ onSubmit, disabled = false }: CreateIntegration
 
     setSubmitting(true)
     try {
-      await onSubmit(trimmedName, provider)
+      await onSubmit(trimmedName, provider, provider === 'instrumented_http' ? environment : undefined)
       setName('')
       setProvider('github')
     } catch (error) {
@@ -62,8 +63,26 @@ function CreateIntegrationForm({ onSubmit, disabled = false }: CreateIntegration
         >
           <option value="github">GitHub</option>
           <option value="stripe">Stripe</option>
+          <option value="instrumented_http">Instrumented HTTP</option>
         </select>
       </label>
+
+      {provider === 'instrumented_http' ? (
+        <label htmlFor="integration-environment">
+          Environment
+          <select
+            id="integration-environment"
+            value={environment}
+            onChange={(event) => setEnvironment(event.target.value as Environment)}
+            disabled={disabled || submitting}
+          >
+            <option value="local">local</option>
+            <option value="test">test</option>
+            <option value="staging">staging</option>
+            <option value="production">production</option>
+          </select>
+        </label>
+      ) : null}
 
       {formError ? <p className="error-text">{formError}</p> : null}
 

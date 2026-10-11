@@ -1,16 +1,17 @@
 import { useMemo } from 'react'
 import { apiOrigin, getReliabilityOverview } from '../api'
 import CreateIntegrationForm from '../components/CreateIntegrationForm'
+import InstrumentedApps from '../components/InstrumentedApps'
 import GitHubConnectionPanel from '../components/GitHubConnectionPanel'
 import IntegrationsTable from '../components/IntegrationsTable'
 import SectionStatus from '../components/SectionStatus'
 import SummaryCards from '../components/SummaryCards'
 import { useResource, type Resource } from '../hooks'
-import type { Integration, IntegrationProvider } from '../types'
+import type { Environment, Integration, IntegrationProvider } from '../types'
 
 interface IntegrationsPageProps {
   integrations: Resource<Integration[]>
-  onCreate: (name: string, provider: IntegrationProvider) => Promise<void>
+  onCreate: (name: string, provider: IntegrationProvider, environment?: Environment) => Promise<void>
 }
 
 function loadOverview() {
@@ -21,6 +22,7 @@ function IntegrationsPage({ integrations, onCreate }: IntegrationsPageProps) {
   const items = useMemo(() => integrations.data ?? [], [integrations.data])
   const github = items.filter((item) => item.provider === 'github')
   const stripe = items.filter((item) => item.provider === 'stripe')
+  const instrumented = items.filter((item) => item.provider === 'instrumented_http')
   const overview = useResource(loadOverview)
   const verification = useMemo(() => {
     const map = new Map<string, boolean>()
@@ -78,6 +80,8 @@ function IntegrationsPage({ integrations, onCreate }: IntegrationsPageProps) {
               </div>
             </section>
           ) : null}
+
+          <InstrumentedApps integrations={instrumented} onChanged={integrations.reload} />
 
           {stripe.length > 0 ? (
             <section className="panel">
