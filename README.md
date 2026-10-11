@@ -67,9 +67,7 @@ The following are real screenshots of the running local application. Captions di
 
 ### 1. Reliability overview
 
-Health comes from stored observations. Missing evidence does not become invented uptime, and Failure Lab simulations do not change live health.
-
-![Local reliability overview with healthy and degraded integration cards](docs/assets/portfolio/linkedin/01-overview.png)
+The full-width dashboard image at the top of this README shows evidence-derived health: missing observations never become invented uptime, and Failure Lab simulations do not change live health.
 
 ### 2. Inspect real GitHub API evidence
 
