@@ -51,7 +51,10 @@ function IntegrationsPage({ integrations, onCreate }: IntegrationsPageProps) {
           <SummaryCards integrations={items} />
           <section className="panel">
             <div className="panel-header">
-              <h2>Integrations</h2>
+              <div>
+                <h2>Configured integrations</h2>
+                <p className="muted small-text">Provider identity and connection state for this operator console.</p>
+              </div>
               <button type="button" className="secondary-button" onClick={integrations.reload}>
                 Refresh
               </button>

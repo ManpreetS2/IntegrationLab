@@ -152,8 +152,12 @@ function OverviewPage() {
 
           <section className="panel">
             <div className="panel-header">
-              <h2>Integration health</h2>
-              <span className="muted small-text">Derived from stored evidence only — no provider calls.</span>
+              <div>
+                <h2>Integration health</h2>
+                <p className="muted small-text">
+                  Live health uses stored real evidence only. Simulated failures never alter provider health.
+                </p>
+              </div>
             </div>
             {data.integrations.length === 0 ? (
               <p className="empty-state">No integrations yet. Create one on the Integrations page.</p>

@@ -22,6 +22,55 @@ export const PAGES: { id: Page; label: string }[] = [
   { id: 'audit', label: 'Audit' },
 ]
 
+export const PAGE_META: Record<Page, { label: string; title: string; description: string }> = {
+  overview: {
+    label: 'Overview',
+    title: 'Overview',
+    description: 'Integration health from stored evidence — what is healthy, failing, and next to inspect.',
+  },
+  integrations: {
+    label: 'Integrations',
+    title: 'Integrations',
+    description: 'Connect GitHub and Stripe providers. Secrets stay on the server; the console shows status only.',
+  },
+  requests: {
+    label: 'Requests',
+    title: 'Requests',
+    description: 'Inspect provider API calls — real traffic versus Failure Lab simulations.',
+  },
+  webhooks: {
+    label: 'Webhooks',
+    title: 'Webhooks',
+    description: 'Stripe test-mode delivery, processing, retries, and failed-queue investigation.',
+  },
+  failures: {
+    label: 'Failures',
+    title: 'Failures',
+    description: 'Investigate real failures and run Failure Lab scenarios without changing live health.',
+  },
+  diagnostics: {
+    label: 'Diagnostics',
+    title: 'Diagnostics',
+    description: 'Run stored-evidence checks against an integration and review previous runs.',
+  },
+  support: {
+    label: 'Support Cases',
+    title: 'Support Cases',
+    description: 'Track investigations with pinned evidence, notes, and lifecycle controls.',
+  },
+  audit: {
+    label: 'Audit',
+    title: 'Audit',
+    description: 'Secret-safe operator and system events with correlation identifiers.',
+  },
+}
+
+export const NAV_GROUPS: { label: string; pages: Page[] }[] = [
+  { label: 'Monitor', pages: ['overview', 'integrations'] },
+  { label: 'Investigate', pages: ['requests', 'webhooks', 'failures'] },
+  { label: 'Resolve', pages: ['diagnostics', 'support', 'audit'] },
+]
+
 const PAGE_IDS = new Set<string>(PAGES.map((page) => page.id))
 
 export interface HashRoute {

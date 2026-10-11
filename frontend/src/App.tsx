@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { API_URL, ApiError, createIntegration, getReliabilitySystem, listIntegrations } from './api'
+import { ApiError, createIntegration, getReliabilitySystem, listIntegrations } from './api'
+import AppShell from './components/AppShell'
 import SectionStatus from './components/SectionStatus'
 import StripeWebhooksPanel from './components/StripeWebhooksPanel'
-import { PAGES, pageHref, useHashRoute, useResource } from './hooks'
+import { pageHref, useHashRoute, useResource } from './hooks'
 import AuditPage from './pages/AuditPage'
 import DiagnosticsPage from './pages/DiagnosticsPage'
 import FailuresPage from './pages/FailuresPage'
@@ -45,6 +46,7 @@ function DatabaseIndicator() {
   }
   return (
     <div className={`status-chip status-chip-${tone}`} role="status">
+      <span className={`status-dot status-dot-${tone}`} aria-hidden="true" />
       {label}
     </div>
   )
@@ -69,72 +71,49 @@ function App() {
   const needsIntegrations = route.page !== 'overview' && route.page !== 'integrations'
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <h1>IntegrationLab</h1>
-          <p className="subtitle">Partner Integration Support &amp; Reliability Console</p>
+    <AppShell page={route.page} connectivity={<DatabaseIndicator />}>
+      {oauthNotice ? (
+        <div className={`banner ${noticeIsError ? 'banner-error' : 'banner-success'}`} role="status">
+          <strong>{oauthNotice}</strong>
+          <button type="button" className="secondary-button" onClick={() => setOauthNotice(null)}>
+            Dismiss
+          </button>
         </div>
-        <div className="header-meta">
-          <DatabaseIndicator />
-          <p className="muted api-url">API: {API_URL || 'same origin'}</p>
-        </div>
-      </header>
+      ) : null}
 
-      <nav className="app-nav" aria-label="Console sections">
-        {PAGES.map((page) => (
-          <a
-            key={page.id}
-            href={pageHref(page.id)}
-            className={route.page === page.id ? 'nav-link nav-link-active' : 'nav-link'}
-            aria-current={route.page === page.id ? 'page' : undefined}
-          >
-            {page.label}
-          </a>
-        ))}
-      </nav>
+      {needsIntegrations ? (
+        <SectionStatus
+          loading={integrations.loading}
+          error={integrations.error}
+          hasData={Boolean(integrations.data)}
+          onRetry={integrations.reload}
+          loadingText="Loading integrations…"
+        />
+      ) : null}
 
-      <main className="app-main">
-        {oauthNotice ? (
-          <div className={`banner ${noticeIsError ? 'banner-error' : 'banner-success'}`} role="status">
-            <strong>{oauthNotice}</strong>
-            <button type="button" className="secondary-button" onClick={() => setOauthNotice(null)}>
-              Dismiss
-            </button>
-          </div>
-        ) : null}
-
-        {needsIntegrations ? (
-          <SectionStatus
-            loading={integrations.loading}
-            error={integrations.error}
-            hasData={Boolean(integrations.data)}
-            onRetry={integrations.reload}
-            loadingText="Loading integrations…"
-          />
-        ) : null}
-
-        {route.page === 'overview' ? <OverviewPage /> : null}
-        {route.page === 'integrations' ? (
-          <IntegrationsPage integrations={integrations} onCreate={handleCreate} />
-        ) : null}
-        {route.page === 'requests' ? <RequestsPage integrations={items} /> : null}
-        {route.page === 'webhooks' ? (
-          <section className="panel">
+      {route.page === 'overview' ? <OverviewPage /> : null}
+      {route.page === 'integrations' ? (
+        <IntegrationsPage integrations={integrations} onCreate={handleCreate} />
+      ) : null}
+      {route.page === 'requests' ? <RequestsPage integrations={items} /> : null}
+      {route.page === 'webhooks' ? (
+        <section className="panel">
+          <div className="panel-header">
             <h2>Stripe Webhooks</h2>
-            <StripeWebhooksPanel integrations={items} />
-          </section>
-        ) : null}
-        {route.page === 'failures' ? (
-          <FailuresPage integrations={items} onIntegrationsChanged={reloadIntegrations} />
-        ) : null}
-        {route.page === 'diagnostics' && integrations.data ? (
-          <DiagnosticsPage integrations={items} requestedIntegrationId={route.params.get('integration')} />
-        ) : null}
-        {route.page === 'support' ? <SupportCasesPage integrations={items} /> : null}
-        {route.page === 'audit' ? <AuditPage /> : null}
-      </main>
-    </div>
+            <span className="muted small-text">Operator-triggered processing · test mode</span>
+          </div>
+          <StripeWebhooksPanel integrations={items} />
+        </section>
+      ) : null}
+      {route.page === 'failures' ? (
+        <FailuresPage integrations={items} onIntegrationsChanged={reloadIntegrations} />
+      ) : null}
+      {route.page === 'diagnostics' && integrations.data ? (
+        <DiagnosticsPage integrations={items} requestedIntegrationId={route.params.get('integration')} />
+      ) : null}
+      {route.page === 'support' ? <SupportCasesPage integrations={items} /> : null}
+      {route.page === 'audit' ? <AuditPage /> : null}
+    </AppShell>
   )
 }
 
