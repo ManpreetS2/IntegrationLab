@@ -1,181 +1,183 @@
 # IntegrationLab
 
-A support and reliability console for debugging third-party API and webhook integrations.
+**Debug broken integrations with evidence, not guesses.**
 
-**Problem:** partner integrations fail for many different reasons — expired credentials, permissions, rate limits, provider outages, at-least-once webhooks, duplicate deliveries, processing bugs, and configuration mistakes. Dashboards that invent uptime make that worse.
+IntegrationLab is a **self-hosted, single-operator integration support console** built to investigate GitHub API failures and Stripe test-mode webhooks. It brings provider requests, reliability signals, guided diagnostics, incident cases, and safe recovery workflows into one React dashboard.
 
-**Solution:** IntegrationLab turns messy provider behavior into **durable evidence**, **deterministic health**, **guided diagnostics**, and **operator support cases** with correlation and audit — so you can answer what broke, what evidence matters, what the operator did, and what state the investigation is in.
+[![IntegrationLab CI](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml)
 
-| Reader | Time | Start here |
-|--------|------|------------|
-| Recruiter | 30s | This intro + Demo + Features |
-| Engineer | 3 min | Architecture + Reliability + Security |
-| Interviewer | 10 min | Live console, [demo script](docs/demo-script.md), [ADRs](docs/adr/), [case study](docs/customer-case-study.md) |
+![Actual IntegrationLab reliability dashboard showing integration health and diagnostic evidence](docs/assets/portfolio/linkedin/01-overview.png)
 
-## Why I built it
+*Actual local Docker Compose UI, captured during an earlier acceptance session. This is not a public cloud service or production customer monitoring.*
 
-Calling an API is easy. Diagnosing a broken customer integration under time pressure is not.
+**[Try it locally](#try-it-yourself) · [Screenshots](#see-it-in-action) · [Capabilities](#what-it-does) · [Architecture](#how-it-works) · [Verification](#verification) · [License & contributions](#license-and-contributions)**
 
-I wanted a portfolio project that proves I can design:
+## Try it yourself
 
-- OAuth connection flows with real security hygiene (state + PKCE + encrypted tokens)
-- Stripe-style webhook reliability (raw-body signatures, dedupe, idempotent effects, bounded retries)
-- evidence-based reliability (not fake uptime)
-- support operations on top of that evidence (cases, timeline, audit, correlation)
-- CI packaging and a cost-conscious AWS architecture I can explain honestly
+**You can run the entire application on your own machine.** No GitHub OAuth App, Stripe account, or AWS account is required for the simulated demo.
+
+**Requirements:** Docker with Compose, Git, Make, and Python 3. Commands below use a macOS/Linux shell (Windows users can use WSL2 with Docker integration).
+
+```bash
+git clone https://github.com/ManpreetS2/IntegrationLab.git
+cd IntegrationLab
+export OPERATOR_API_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+make demo
+```
+
+Open **http://localhost:8080**. The dashboard will ask you to unlock it using the generated operator key. To see that key in your own terminal, use `echo "$OPERATOR_API_KEY"`. Keep it private.
+
+**What the demo gives you:**
+- A running React UI, FastAPI service, PostgreSQL database, and applied migrations via Docker Compose.
+- Example GitHub and Stripe integration records.
+- Deterministic **simulated** 401, 429, 500, and timeout failures with evidence-based diagnoses.
+- A saved Stripe configuration/diagnostic result to explore in the UI.
+
+`make demo` does **not** connect a real GitHub account, deliver a real Stripe webhook, or populate production traffic. You can explore the dashboard first and set up live provider tests later.
+
+To stop the demo **without removing its database volume**:
+
+```bash
+docker compose -f docker-compose.full.yml down
+```
+
+To intentionally reset the demo **and delete its local database volume**, run `make compose-down`.
+
+### Connect your own test integrations
+
+The demo is optional. To exercise **real GitHub OAuth** or **Stripe test-mode signed webhooks**, configure your own provider credentials and follow the [step-by-step external acceptance runbook](docs/external-acceptance.md).
+
+- **GitHub:** Register an OAuth App with the exact local callback, configure `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `TOKEN_ENCRYPTION_KEY`, then authorize and check your own connection.
+- **Stripe:** Use Stripe CLI in **test mode**, forward signed webhooks to your IntegrationLab endpoint, set `STRIPE_WEBHOOK_SECRET`, and inspect durable receipt, duplicates, processing, and failures.
+- **Security:** Use a strong `OPERATOR_API_KEY` whenever provider credentials are configured. Never commit `.env` files or share credentials in screenshots.
+
+Both integrations were previously exercised against real providers using this local Compose application; see [verification evidence](docs/verification.md). Running the simulated demo by itself is not external provider verification.
+
+### Can I add IntegrationLab to an existing application?
+
+**Not as a copy-paste plugin today.** This repository is a **standalone application**, not a published Python package, JavaScript SDK, generic API gateway, or drop-in payment integration.
+
+You can run it separately to learn and test its existing GitHub and Stripe workflows. To reuse its webhook-processing approach inside another application, a developer would need to adapt the API routes, authentication, event handlers, database models, and domain-specific business effects. The included Stripe handlers record internal demo effects; they do not automatically connect to another product's payment or order system.
+
+The intended first experience is **clone → `make demo` → explore**, without any code changes.
+
+## See it in action
+
+The following are real screenshots of the running local application. Captions distinguish **real provider evidence** from **synthetic/demo events**.
+
+### 1. Reliability overview
+
+The full-width dashboard image at the top of this README shows evidence-derived health: missing observations never become invented uptime, and Failure Lab simulations do not change live health.
+
+### 2. Inspect real GitHub API evidence
+
+The Requests view records safe endpoint labels, HTTP status codes, request latency, and whether an observation was real or simulated. This screenshot comes from an earlier **real GitHub OAuth/REST acceptance** session.
+
+![IntegrationLab real GitHub provider request table showing status codes and latency](docs/assets/portfolio/03-real-provider-request.png)
+
+### 3. Follow Stripe webhook processing
+
+The Webhooks view shows received events, processing states, and duplicate deliveries. **This screenshot uses locally HMAC-signed synthetic test events**, not a fresh Stripe CLI delivery.
+
+![IntegrationLab Stripe test webhook dashboard with processed and duplicate event counts](docs/assets/portfolio/linkedin/04-stripe-webhook.png)
+
+### 4. Investigate the failed queue
+
+Review a failed processing attempt, inspect its reason, and locate the operator's Retry/Dismiss controls. The event shown here is **synthetic test data**; the classification and UI workflow are implemented.
+
+![Failed Stripe webhook processing details and retry dismissal controls](docs/assets/portfolio/linkedin/05-failed-queue.png)
+
+### 5. Organize a support case
+
+A support case links evidence, notes, severity, lifecycle status, correlation IDs, and a derived timeline. This screenshot explicitly labels **SIMULATED Failure Lab** evidence and is **not a real customer outage**.
+
+![IntegrationLab support case with simulated pinned evidence and investigation timeline](docs/assets/portfolio/linkedin/03-support-case.png)
+
+[More screenshot provenance and the complete LinkedIn image set](docs/assets/portfolio/linkedin/README.md)
 
 ## What it does
 
-- **GitHub OAuth** — authorization code + state + PKCE, Fernet-encrypted tokens, profile + connection check
-- **Provider request evidence** — real vs **SIMULATED** clearly separated
-- **Failure Lab** — deterministic provider failure reproduction without mutating live health
-- **Stripe webhooks** — signature verify → durable receipt → process → 1s/2s/4s retry → failed queue
-- **Delivery dedupe + effect idempotency** — at-least-once safe
-- **Reliability dashboard** — health derived from stored evidence only (no surprise provider calls)
-- **Guided diagnostics** — persisted runs/checks; optional real GitHub probe when asked
-- **Support Cases** — lifecycle, severity, notes, evidence pinning, derived timeline
-- **Correlation IDs + operator audit** — intent audited before webhook side effects; safe metadata allowlist
-- **Docker Compose + CI** — Postgres → migrate → API → nginx UI; six GitHub Actions quality gates
-- **Terraform AWS architecture** — CloudFront, S3, ALB, ECS/Fargate, RDS, Secrets Manager, OIDC (apply is manual)
+| Feature | What you can inspect or demonstrate |
+| --- | --- |
+| **GitHub OAuth and REST** | Authorization code + state/PKCE, encrypted access tokens, connection checks and real `GET /user` request evidence |
+| **Stripe webhook reliability** | Signature verification on the raw body, durable receipt, delivery deduplication, idempotent internal effects and processing attempts |
+| **Retry and recovery** | Bounded retry policy, persisted failures, inspectable failed-event queue and operator-triggered recovery |
+| **Failure Lab** | Reproducible simulated failures and deterministic diagnoses without changing real provider health |
+| **Reliability and diagnostics** | Passive evidence-derived health; explicit operator-triggered diagnostics instead of unannounced provider calls |
+| **Support cases and audit** | Pinned evidence, status transitions, timelines, correlation IDs, and secret-safe operator audit metadata |
 
-## Demo
-
-Canonical story after the completed external-acceptance run (see [docs/external-acceptance.md](docs/external-acceptance.md) and [docs/verification.md](docs/verification.md)):
-
-1. Real GitHub OAuth connect + encrypted token + `GET /user`
-2. Diagnostics / provider evidence (`is_simulated=false`)
-3. Support Case → pin evidence → note → status transitions
-4. Correlation + audit trail
-5. Revoke/reconnect negative path (when demonstrating recovery)
-6. Stripe signed webhook → process → duplicate absorption → failed queue (permanent failure classification)
-
-Screenshots (safe only): [docs/assets/portfolio/](docs/assets/portfolio/).
-
-For a deterministic **simulated** dataset without touching providers, use `make demo` and say so out loud.
-
-## Architecture
+## How it works
 
 ```mermaid
 flowchart LR
-  Browser[Browser / React console]
-  Nginx[nginx same-origin proxy]
-  API[FastAPI]
-  DB[(PostgreSQL)]
-  GH[GitHub OAuth / REST]
-  ST[Stripe webhooks]
-
-  Browser --> Nginx
-  Nginx --> API
-  API --> DB
-  API -->|outbound real or simulated| GH
-  ST -->|signed inbound| Nginx
+    User[Operator browser] --> Edge[React / nginx]
+    Edge --> API[FastAPI]
+    API --> DB[(PostgreSQL)]
+    API -->|Authenticated REST requests| GH[GitHub API]
+    Stripe[Stripe test-mode webhooks] -->|Signed events| Edge
+    DB <--> Processor[Operator/CLI-triggered webhook processing]
+    API --> Diagnosis[Evidence-based health and diagnostics]
+    API --> Cases[Support cases and audit]
 ```
 
-Domain modules on the API: OAuth + provider requests · Failure Lab · webhook receiver/processor · reliability · diagnostics · Support Cases · audit/correlation.
+Three boundaries matter:
 
-AWS topology (Terraform; **not auto-applied**): CloudFront → S3 + ALB → ECS Fargate → private RDS; Secrets Manager; GitHub Actions OIDC. Details: [docs/architecture.md](docs/architecture.md), [docs/aws-deployment.md](docs/aws-deployment.md).
+1. **Webhook delivery is not webhook processing.** Validate the signature against the original body, store the event durably, acknowledge receipt, then process it separately through bounded, recorded attempts.
+2. **Delivery deduplication is not the same as business-effect idempotency.** Repeated delivery of one event must not reapply its effect; separate events for the same object can be legitimate.
+3. **Simulated evidence is not live provider evidence.** Failure Lab records are visibly marked and excluded from provider health aggregation.
 
-## Reliability engineering
+Processing is **operator/CLI-triggered**, not an always-on background worker. The system is designed as a local, single-operator portfolio console, not a multi-tenant production SaaS.
 
-- Health ∈ `healthy` / `degraded` / `failed` / `unknown` / `not_configured`
-- Missing evidence → `unknown` (never fake healthy)
-- Simulations excluded from live health
-- Provider **delivery dedupe** ≠ **business-effect idempotency** (both implemented)
-- Append-only processing attempts; bounded retries; failed queue for operators
+### Stack
 
-## Security
+| Layer | Technology |
+| --- | --- |
+| Frontend | React, TypeScript, Vite, nginx |
+| Backend | Python, FastAPI, SQLAlchemy, Pydantic |
+| Database | PostgreSQL 18, Alembic |
+| Local runtime | Docker Compose |
+| CI | GitHub Actions: backend, frontend, containers, assembled-stack smoke, Terraform |
+| Optional AWS design | Terraform for CloudFront, S3, ALB, ECS/Fargate, RDS, Secrets Manager and GitHub OIDC |
 
-- OAuth `state` + PKCE; tokens encrypted at rest
-- Stripe signatures over the **exact raw body**
-- Single-operator Bearer gate in production (runtime key; not baked into Vite)
-- Audit allowlist; no tokens/bodies/Authorization headers in audit metadata
-- Threat model: [docs/threat-model.md](docs/threat-model.md)
+**AWS has not been deployed.** The Terraform architecture was formatted and validated in CI, but no `terraform apply` or cloud-runtime acceptance was performed. See the [full architecture](docs/architecture.md), [AWS deployment design](docs/aws-deployment.md), and [architecture decision records](docs/adr/).
 
-Not multi-user RBAC. Not multi-tenant authz.
+## Verification
 
-## Testing & CI
+**Verified in October 2026:**
+
+- **331 backend tests passed**, including OAuth, webhook signature handling, concurrency, idempotency, retries, diagnostics and support operations.
+- **5 frontend unit tests passed**, plus frontend lint and production build.
+- **6/6 CI jobs passed**, including the full-stack Compose smoke test with operator authentication and persisted Failure Lab/support-case flows.
+- **Separate external acceptance** verified real GitHub OAuth / REST calls, Stripe CLI-signed webhook receipt, duplicate absorption, a failed event, and provider-evidence support cases.
+- **Manual Stripe retry/dismiss and AWS live deployment are not externally verified**; automated coverage and implementation do not imply otherwise.
+
+[GitHub Actions results](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml) · [Exact claim-to-evidence matrix](docs/verification.md) · [External acceptance runbook](docs/external-acceptance.md)
+
+For contributors with the project dependencies installed:
 
 ```bash
-make verify        # pytest + frontend lint/build + terraform validate
-make full-verify   # above + assembled Compose smoke
+make verify       # Backend tests, frontend quality, Terraform validation
+make full-verify  # Above + Docker Compose integration smoke
 ```
 
-CI on every PR/`main` push: backend tests (Postgres 18 + `_test` guard), frontend quality, both container builds, full-stack smoke, Terraform fmt/validate.
+**Caution:** the full-stack smoke workflow removes its temporary Compose database volume when it finishes. Keep important demo data in a separate stack.
 
-Claim → evidence matrix: [docs/verification.md](docs/verification.md).
+## Engineering decisions
 
-## Verification vocabulary
+- **Why PostgreSQL instead of Redis/Kafka?** Durable receipts, concurrency-safe claims, attempts, and idempotent effects are sufficient at this project's scale without another infrastructure dependency.
+- **Why deterministic diagnostics?** Operators can trace recommendations back to actual observations; the interface does not invent a root cause.
+- **Why support cases?** A request log gives one symptom; pinned evidence, notes, status, and correlation preserve an investigation.
+- **Why operator-triggered processing?** It demonstrates the receipt/processing boundary without pretending an always-running worker exists.
+- **Why explicit limitations?** This is not a multi-tenant platform. It has no per-user RBAC, always-on worker, default WAF/rate limiting, or per-integration Stripe signing secrets.
 
-| Status | Meaning |
-|--------|---------|
-| **Implemented** | Code/config exists |
-| **CI verified** | Repository automation exercised it |
-| **Locally verified** | Ran on a developer machine |
-| **Externally verified** | Real provider/cloud step succeeded |
+[Threat model](docs/threat-model.md) · [Support operations](docs/support-operations.md) · [Engineering ADRs](docs/adr/) · [Deferred Phase 2 backlog](docs/phase-2-backlog.md)
 
-AWS `terraform apply` remains **not Externally verified** (cost-gated). GitHub OAuth,
-real `GET /user`, revoke/reconnect, Stripe CLI signed delivery + duplicate absorption +
-failed-queue evidence, and a support case from real evidence are **Externally verified**
-on Compose — see [docs/verification.md](docs/verification.md) and
-[docs/external-acceptance.md](docs/external-acceptance.md).
+## License and contributions
 
-Portfolio screenshots: [docs/assets/portfolio/](docs/assets/portfolio/).
+IntegrationLab is open-source software under the **[MIT License](LICENSE)**. You may clone, modify, and reuse the source code under that license's conditions. It is an application, **not** a drop-in SDK; using the integration handlers with your own product still requires application-specific work.
 
-## Engineering decisions worth discussing
+Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md) for a no-credentials demo, bug-report instructions, and scoped PR guidance. For responsible vulnerability reporting and local-demo security limitations, read [SECURITY.md](SECURITY.md). v1 is feature-complete, so additions are not required to run or demonstrate IntegrationLab.
 
-1. PostgreSQL as the retry/dedupe store instead of adding Redis/Kafka for v1
-2. ContextVar UUID correlation before adopting OpenTelemetry
-3. Support timeline **derived** from history + notes + linked evidence (`occurred_at` vs `pinned_at`)
-4. Sequence-generated `CASE-#####` numbers (race-safe; gaps OK)
-5. Webhook process **intent** audited and committed before the processor’s multi-transaction work
-6. Real vs simulated evidence never silently mixed into live health
+## More documentation
 
-ADRs: [docs/adr/](docs/adr/).
-
-## Run locally
-
-**Full local Compose stack (preferred for demos):**
-
-```bash
-cp .env.example .env   # then fill secrets (see docs/external-acceptance.md)
-# With real GitHub/Stripe credentials, set a generated operator key (do not commit it):
-#   python -c "import secrets; print(secrets.token_urlsafe(32))"
-#   export OPERATOR_API_KEY=...
-make compose-up
-# UI http://127.0.0.1:8080  — unlock with OPERATOR_API_KEY
-# Compose publishes frontend/API on loopback only (safe for LAN); OAuth + Stripe CLI use localhost.
-make demo              # optional simulated dataset
-```
-
-**Day-to-day split process:** Postgres via `docker compose up -d postgres`, backend venv + `uvicorn`, frontend `npm run dev` (see `.env.example`).
-
-## AWS architecture
-
-Terraform under `infra/terraform` defines the portfolio topology. Cost-conscious defaults (no NAT, single-AZ RDS, one task).
-
-**Not deployed unless you explicitly `terraform apply` and accept cost.** Do not read this README as “hosted in AWS.”
-
-## Limitations (honest)
-
-- Single-operator access (no SSO/RBAC/multi-tenancy)
-- No WAF / application rate limiter in the default stack
-- Webhook processing is operator/CLI-triggered (no always-on worker by default)
-- One process-wide `STRIPE_WEBHOOK_SECRET` (URL picks the integration row; not per-endpoint secrets in v1)
-- No Stripe Events reconciliation, provider-status correlation, or batch recovery yet ([Phase 2 backlog](docs/phase-2-backlog.md))
-- CloudFront→ALB HTTP in the portfolio design (viewer HTTPS); real sensitive use needs origin TLS
-- AWS stack is implemented + CI-validated, not automatically applied
-
-## Docs index
-
-| Doc | Topic |
-|-----|-------|
-| [external-acceptance.md](docs/external-acceptance.md) | Real GitHub/Stripe acceptance checklist |
-| [support-operations.md](docs/support-operations.md) | Cases, audit, correlation, timeline |
-| [verification.md](docs/verification.md) | Claim → evidence matrix |
-| [demo-script.md](docs/demo-script.md) | 60s + 5-minute walkthrough |
-| [interview-questions.md](docs/interview-questions.md) | Concise Q&A |
-| [resume-bullets.md](docs/resume-bullets.md) | Resume-ready bullets |
-| [linkedin-post.md](docs/linkedin-post.md) | Project post draft |
-| [phase-2-backlog.md](docs/phase-2-backlog.md) | Explicitly not built yet |
-| [threat-model.md](docs/threat-model.md) | Trust boundaries |
-| [customer-case-study.md](docs/customer-case-study.md) | Incident exercise |
+[60-second demo and technical walkthrough](docs/demo-script.md) · [Customer case study](docs/customer-case-study.md) · [Interview Q&A](docs/interview-questions.md) · [Resume bullets](docs/resume-bullets.md) · [LinkedIn post draft](docs/linkedin-post.md)
