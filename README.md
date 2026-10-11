@@ -10,7 +10,7 @@ IntegrationLab is a **self-hosted, single-operator integration support console**
 
 *Actual local Docker Compose UI, captured during an earlier acceptance session. This is not a public cloud service or production customer monitoring.*
 
-**[Try it locally](#try-it-yourself) · [Screenshots](#see-it-in-action) · [Capabilities](#what-it-does) · [Architecture](#how-it-works) · [Verification](#verification) · [Engineering decisions](#engineering-decisions)**
+**[Try it locally](#try-it-yourself) · [Screenshots](#see-it-in-action) · [Capabilities](#what-it-does) · [Architecture](#how-it-works) · [Verification](#verification) · [License & contributions](#license-and-contributions)**
 
 ## Try it yourself
 
@@ -171,6 +171,12 @@ make full-verify  # Above + Docker Compose integration smoke
 - **Why explicit limitations?** This is not a multi-tenant platform. It has no per-user RBAC, always-on worker, default WAF/rate limiting, or per-integration Stripe signing secrets.
 
 [Threat model](docs/threat-model.md) · [Support operations](docs/support-operations.md) · [Engineering ADRs](docs/adr/) · [Deferred Phase 2 backlog](docs/phase-2-backlog.md)
+
+## License and contributions
+
+IntegrationLab is open-source software under the **[MIT License](LICENSE)**. You may clone, modify, and reuse the source code under that license's conditions. It is an application, **not** a drop-in SDK; using the integration handlers with your own product still requires application-specific work.
+
+Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md) for a no-credentials demo, bug-report instructions, and scoped PR guidance. For responsible vulnerability reporting and local-demo security limitations, read [SECURITY.md](SECURITY.md). v1 is feature-complete, so additions are not required to run or demonstrate IntegrationLab.
 
 ## More documentation
 
