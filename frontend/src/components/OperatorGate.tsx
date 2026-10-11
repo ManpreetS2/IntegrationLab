@@ -10,6 +10,7 @@ import {
   getOperatorApiKey,
   setOperatorApiKey,
 } from '../auth'
+import AppearanceControl from './AppearanceControl'
 import { AppMark } from './NavIcons'
 
 interface OperatorGateProps {
@@ -91,6 +92,7 @@ function OperatorGate({ children }: OperatorGateProps) {
   return (
     <main className="auth-shell">
       <section className="auth-card" aria-live="polite">
+        <AppearanceControl />
         <div className="auth-brand">
           <AppMark />
           <div>

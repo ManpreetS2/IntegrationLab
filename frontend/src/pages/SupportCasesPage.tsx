@@ -185,7 +185,7 @@ function SupportCasesPage({ integrations }: SupportCasesPageProps) {
         />
         {cases.data ? (
           <div className="table-wrap">
-            <table>
+            <table className="integrations-table">
               <thead>
                 <tr>
                   <th>Case</th>

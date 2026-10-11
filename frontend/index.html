@@ -4,12 +4,26 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <script>
+      (function () {
+        var key = 'integrationlab.appearance'
+        var stored = null
+        try {
+          stored = localStorage.getItem(key)
+        } catch (e) {}
+        var mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system'
+        var dark = window.matchMedia('(prefers-color-scheme: dark)').matches
+        var theme = mode === 'system' ? (dark ? 'dark' : 'light') : mode
+        var root = document.documentElement
+        root.dataset.theme = theme
+        root.dataset.appearance = mode
+        root.style.colorScheme = theme
+      })()
+    </script>
+    <style>
+      html[data-theme='light'] { background: #eceef2; color: #1d1d1f; }
+      html[data-theme='dark'] { background: #1c1c1e; color: #f5f5f7; }
+    </style>
     <title>IntegrationLab</title>
   </head>
   <body>

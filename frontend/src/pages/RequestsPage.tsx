@@ -101,7 +101,9 @@ function RequestsPage({ integrations }: { integrations: Integration[] }) {
           {cards.map(([label, value]) => (
             <article key={label} className="summary-card">
               <p className="summary-label">{label}</p>
-              <p className="summary-value">{value}</p>
+              <p className={label === 'Errors' && m && m.failure_count > 0 ? 'summary-value is-alert' : 'summary-value'}>
+                {value}
+              </p>
             </article>
           ))}
         </div>

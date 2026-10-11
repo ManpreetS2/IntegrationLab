@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { API_URL } from '../api'
 import { NAV_GROUPS, PAGE_META, pageHref, type Page } from '../hooks'
+import AppearanceControl from './AppearanceControl'
 import { AppMark, MenuIcon, NavIcon } from './NavIcons'
 import PageHeader from './PageHeader'
 
@@ -131,7 +132,10 @@ function AppShell({ page, connectivity, children }: AppShellProps) {
           <div className="topbar-title-block">
             <PageHeader title={meta.title} description={meta.description} />
           </div>
-          <div className="topbar-meta">{connectivity}</div>
+          <div className="topbar-meta">
+            <AppearanceControl />
+            {connectivity}
+          </div>
         </header>
         <main className="app-main">{children}</main>
       </div>

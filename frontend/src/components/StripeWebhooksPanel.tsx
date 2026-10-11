@@ -190,7 +190,9 @@ function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
         {cards.map((card) => (
           <article key={card.label} className="summary-card">
             <p className="summary-label">{card.label}</p>
-            <p className="summary-value">{card.value ?? '—'}</p>
+            <p className={card.label === 'Failed' && (card.value ?? 0) > 0 ? 'summary-value is-alert' : 'summary-value'}>
+              {card.value ?? '—'}
+            </p>
           </article>
         ))}
       </div>
