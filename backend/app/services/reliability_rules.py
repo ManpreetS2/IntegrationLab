@@ -22,6 +22,12 @@ MIN_SAMPLE_FOR_ERROR_RATE = 4
 ERROR_RATE_DEGRADED = 0.25
 REPEATED_FAILURES_DEGRADED = 3
 
+# Instrumented HTTP observations are SDK-reported. These thresholds do not
+# reuse GitHub's credential or rate-limit rules.
+INSTRUMENTED_ERROR_RATE_FAILED = 0.80
+INSTRUMENTED_ALL_FAILED_MIN = 3
+INSTRUMENTED_MIN_SAMPLE_FOR_P95 = 20
+
 # GitHub quota: below this, remaining requests count as "low".
 RATE_LIMIT_LOW_REMAINING = 100
 
@@ -95,6 +101,19 @@ _WEBHOOK_ERROR_SUMMARIES = {
     "webhook_processing_error": "Unexpected error while processing a webhook event.",
     "webhook_processing_abandoned": "Webhook processing did not finish (worker stopped).",
 }
+
+
+def telemetry_failure_severity(category: str) -> Severity:
+    if category in {"rate_limited", "http_client_error"}:
+        return Severity.WARNING
+    return Severity.ERROR
+
+
+def telemetry_failure_summary(
+    method: str, route: str, category: str, status_code: int | None
+) -> str:
+    observed = f"HTTP {status_code}" if status_code is not None else "no HTTP response"
+    return f"SDK-reported {method} {route} failed ({category}, {observed})."
 
 
 def webhook_failure_summary(code: str | None, status: str, event_type: str) -> str:

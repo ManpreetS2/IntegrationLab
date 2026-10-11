@@ -22,6 +22,11 @@ from app.db.models.integration import IntegrationORM
 from app.db.models.oauth import ProviderRequestLogORM
 from app.models.github import ProviderRequestLogResponse
 from app.models.integration import IntegrationProvider
+from app.models.telemetry import (
+    InstrumentedHealthResponse,
+    TelemetryEventView,
+    TelemetryObservationMetrics,
+)
 from app.models.reliability import (
     DiagnosticRunBrief,
     FailureItem,
@@ -38,6 +43,8 @@ from app.models.reliability import (
     WebhookMetrics,
 )
 from app.models.webhook import WebhookEventSummary
+from app.repositories.ingestion_credentials import ingestion_credential_repository
+from app.repositories.telemetry import telemetry_repository
 from app.repositories.reliability import (
     AttemptAggregate,
     LatestRequest,
@@ -46,6 +53,7 @@ from app.repositories.reliability import (
     reliability_repository as repo,
 )
 from app.services import reliability_rules as rules
+from app.services.instrumented_health import assess_instrumented
 from app.services.health_evaluator import (
     GitHubEvidence,
     HealthAssessment,
@@ -222,6 +230,16 @@ class ReliabilityService:
                 include_simulated=False,
                 limit=DETAIL_LIST_LIMIT,
             )
+            telemetry_events = (
+                telemetry_repository.recent_for_integration(
+                    session,
+                    integration_id=integration_id,
+                    since=since,
+                    limit=DETAIL_LIST_LIMIT,
+                )
+                if health.provider == IntegrationProvider.INSTRUMENTED_HTTP.value
+                else []
+            )
         except SQLAlchemyError as exc:
             session.rollback()
             raise DatabaseUnavailableError from exc
@@ -232,6 +250,7 @@ class ReliabilityService:
             window_hours=window_hours,
             recent_requests=[ProviderRequestLogResponse.model_validate(r) for r in requests],
             recent_webhook_events=[WebhookEventSummary.model_validate(e) for e in events],
+            recent_telemetry_events=[TelemetryEventView.model_validate(row) for row in telemetry_events],
             recent_failures=failures,
         )
 
@@ -346,12 +365,19 @@ class ReliabilityService:
         attempt_aggs = repo.attempt_aggregates(session, since=since)
         diagnostics = repo.latest_diagnostic_runs(session)
         secret_configured = bool(get_settings().stripe_webhook_secret)
+        telemetry_aggs = telemetry_repository.aggregates(session, since=since)
+        telemetry_latest = telemetry_repository.latest_in_window(session, since=since)
+        telemetry_categories = telemetry_repository.category_counts(session, since=since)
+        telemetry_activity = telemetry_repository.last_occurred(session)
+        telemetry_older = telemetry_repository.integrations_with_events_before(session, before=since)
+        active_credentials = ingestion_credential_repository.active_counts(session)
 
         results: list[IntegrationHealth] = []
         for integration in integrations:
             iid = integration.id
             request_metrics: RequestMetrics | None = None
             webhook_metrics: WebhookMetrics | None = None
+            telemetry_metrics = None
             last_activity: datetime | None = None
 
             if integration.provider == IntegrationProvider.GITHUB.value:
@@ -382,6 +408,21 @@ class ReliabilityService:
                     if secret_configured
                     else "Webhook verification not configured"
                 )
+            elif integration.provider == IntegrationProvider.INSTRUMENTED_HTTP.value:
+                assessment, telemetry_metrics = assess_instrumented(
+                    aggregate=telemetry_aggs.get(iid),
+                    latest=telemetry_latest.get(iid),
+                    categories=telemetry_categories.get(iid, {}),
+                    active_credentials=active_credentials.get(iid, 0),
+                    has_older_observations=iid in telemetry_older,
+                    window_hours=window_hours,
+                )
+                last_activity = telemetry_activity.get(iid)
+                configuration = (
+                    "Ingestion credential active"
+                    if active_credentials.get(iid, 0)
+                    else "No ingestion credential"
+                )
             else:
                 assessment = HealthAssessment(
                     HealthState.UNKNOWN, "No reliability rules exist for this provider yet."
@@ -404,6 +445,7 @@ class ReliabilityService:
                     last_checked_at=integration.last_checked_at,
                     request_metrics=request_metrics,
                     webhook_metrics=webhook_metrics,
+                    telemetry_metrics=telemetry_metrics,
                     latest_diagnostic=DiagnosticRunBrief(
                         id=run.id,
                         overall_status=run.overall_status,
@@ -423,6 +465,7 @@ class ReliabilityService:
         real = repo.request_aggregates(session, since=since, is_simulated=False, by_integration=False).get(None)
         received, duplicates = repo.webhook_window_totals(session, since=since)
         webhooks = [h.webhook_metrics for h in healths if h.webhook_metrics is not None]
+        sdk_observations, sdk_errors = telemetry_repository.count_window(session, since=since)
         return OperationalMetrics(
             real_provider_requests=real.request_count if real else 0,
             real_provider_errors=(real.request_count - real.success_count) if real else 0,
@@ -435,6 +478,8 @@ class ReliabilityService:
             webhook_failed=sum(w.failed for w in webhooks),
             webhook_pending=sum(w.pending for w in webhooks),
             diagnostic_runs=repo.count_diagnostic_runs(session, since=since),
+            sdk_reported_observations=sdk_observations,
+            sdk_reported_errors=sdk_errors,
         )
 
     def _failures(
@@ -455,11 +500,14 @@ class ReliabilityService:
                 FailureSource.PROVIDER_REQUEST,
                 FailureSource.WEBHOOK_PROCESSING,
                 FailureSource.DIAGNOSTIC,
+                FailureSource.SDK_TELEMETRY,
             }
             if include_simulated:
                 sources.add(FailureSource.FAILURE_LAB)
 
-        names = {i.id: i.name for i in repo.integrations(session)}
+        integration_rows = repo.integrations(session)
+        names = {i.id: i.name for i in integration_rows}
+        providers = {i.id: i.provider for i in integration_rows}
         items: list[FailureItem] = []
 
         if FailureSource.PROVIDER_REQUEST in sources:
@@ -560,8 +608,82 @@ class ReliabilityService:
                     )
                 )
 
+        if FailureSource.SDK_TELEMETRY in sources and provider in (None, IntegrationProvider.INSTRUMENTED_HTTP.value):
+            for row in telemetry_repository.failed_events(
+                session,
+                since=since,
+                integration_id=integration_id,
+                provider=provider,
+                limit=limit,
+            ):
+                category = row.error_category or "sdk_reported_error"
+                items.append(
+                    FailureItem(
+                        id=f"sdk_telemetry:{row.event_id}",
+                        source=FailureSource.SDK_TELEMETRY,
+                        integration_id=row.integration_id,
+                        integration_name=names.get(row.integration_id),
+                        provider=providers.get(row.integration_id, IntegrationProvider.INSTRUMENTED_HTTP.value),
+                        occurred_at=row.occurred_at,
+                        severity=rules.telemetry_failure_severity(category),
+                        code=category,
+                        summary=rules.telemetry_failure_summary(
+                            row.method, row.route_template, category, row.status_code
+                        ),
+                        provenance="sdk_reported",
+                        service=row.service,
+                        error_category=row.error_category,
+                        method=row.method,
+                        endpoint=row.route_template,
+                        status_code=row.status_code,
+                        latency_ms=row.duration_ms,
+                    )
+                )
+
         items.sort(key=lambda item: item.occurred_at, reverse=True)
         return items[:limit]
+
+    def instrumented_health(
+        self,
+        session: Session,
+        integration_id: UUID,
+        *,
+        window_hours: int,
+        now: datetime | None = None,
+    ) -> InstrumentedHealthResponse:
+        now = now or _utcnow()
+        since = now - timedelta(hours=window_hours)
+        integration = session.get(IntegrationORM, integration_id)
+        if integration is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Integration not found")
+        if integration.provider != IntegrationProvider.INSTRUMENTED_HTTP.value:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="Universal health is only available for instrumented_http integrations",
+            )
+        health = next(
+            item
+            for item in self._integration_healths(
+                session, since=since, now=now, window_hours=window_hours
+            )
+            if item.integration_id == integration_id
+        )
+        return InstrumentedHealthResponse(
+            integration_id=health.integration_id,
+            name=health.name,
+            provider="instrumented_http",
+            connection_status=health.connection_status,
+            configuration=health.configuration,
+            health=health.health.value,
+            summary=health.summary,
+            evidence=health.evidence,
+            recommended_action=health.recommended_action,
+            last_activity_at=health.last_activity_at,
+            window_hours=window_hours,
+            window_started_at=since,
+            generated_at=now,
+            metrics=health.telemetry_metrics or TelemetryObservationMetrics(),
+        )
 
 
 reliability_service = ReliabilityService()

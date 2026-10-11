@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models.diagnostics import DiagnosticCheckORM, DiagnosticRunORM
 from app.db.models.integration import IntegrationORM
+from app.models.integration import IntegrationProvider
 from app.models.diagnostics import (
     CheckCounts,
     CheckStatus,
@@ -60,6 +61,14 @@ class DiagnosticsService:
         integration = session.get(IntegrationORM, integration_id)
         if integration is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration not found")
+        if integration.provider == IntegrationProvider.INSTRUMENTED_HTTP.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Active diagnostics do not probe instrumented HTTP integrations. "
+                    "Health is derived only from SDK-reported observations."
+                ),
+            )
         if integration.provider not in ("github", "stripe"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

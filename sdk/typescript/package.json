@@ -1,0 +1,26 @@
+{
+  "name": "@integrationlab/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-side TypeScript SDK for reporting sanitized HTTP outcomes to a self-hosted IntegrationLab. Not published to npm.",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/client.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

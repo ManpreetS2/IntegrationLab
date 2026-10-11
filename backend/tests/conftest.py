@@ -97,12 +97,22 @@ def TestingSessionLocal(test_engine):
 
 
 @pytest.fixture(autouse=True)
+def _reset_ingestion_rate_limits() -> Generator[None, None, None]:
+    from app.core.ingestion_rate_limit import reset_ingestion_rate_limits
+
+    reset_ingestion_rate_limits()
+    yield
+    reset_ingestion_rate_limits()
+
+
+@pytest.fixture(autouse=True)
 def clean_db(test_engine, TestingSessionLocal) -> Generator[None, None, None]:
     """Truncate tables before each test, then reseed demo rows."""
     with test_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE support_case_evidence, support_case_notes, "
+                "TRUNCATE TABLE telemetry_events, ingestion_credentials, "
+                "support_case_evidence, support_case_notes, "
                 "support_case_history, operator_audit_events, support_cases, "
                 "diagnostic_checks, diagnostic_runs, "
                 "webhook_effects, webhook_processing_attempts, webhook_events, "

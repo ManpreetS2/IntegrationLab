@@ -116,6 +116,11 @@ class Settings(BaseSettings):
             )
         object.__setattr__(self, "database_url", resolved)
 
+        if self.operator_api_key and self.operator_api_key.startswith("ilk_"):
+            raise ValueError(
+                "OPERATOR_API_KEY must not use the ingestion credential prefix 'ilk_'."
+            )
+
         if self.app_env == "production":
             key = self.operator_api_key or ""
             if len(key) < MIN_OPERATOR_API_KEY_LENGTH:
