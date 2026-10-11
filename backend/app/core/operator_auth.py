@@ -10,6 +10,10 @@ Public-by-design routes:
 - GitHub OAuth callback
 - GitHub OAuth connect redirect (requires an unguessable integration UUID and
   only starts the provider flow; the rest of the operator surface stays gated)
+
+POST /api/telemetry/v1/events is not operator-authenticated. It requires an
+ingestion credential, checked by the route. An ingestion credential (prefix
+ilk_v1_) is rejected on every other /api route.
 """
 
 from __future__ import annotations
@@ -28,6 +32,13 @@ _GITHUB_CONNECT_RE = re.compile(
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/github/connect$"
 )
 _PUBLIC_API_GET_PATHS = {"/api/oauth/github/callback"}
+_TELEMETRY_INGEST_PATH = "/api/telemetry/v1/events"
+_INGESTION_CREDENTIAL_PREFIX = "ilk_v1_"
+
+
+def is_telemetry_ingest(path: str, method: str) -> bool:
+    """True only for the SDK ingestion route, which has its own credential."""
+    return method.upper() == "POST" and path == _TELEMETRY_INGEST_PATH
 
 
 def is_public_api_request(path: str, method: str) -> bool:
@@ -35,6 +46,13 @@ def is_public_api_request(path: str, method: str) -> bool:
     if method.upper() != "GET":
         return False
     return path in _PUBLIC_API_GET_PATHS or bool(_GITHUB_CONNECT_RE.fullmatch(path))
+
+
+def _authorization_header(scope: Scope) -> str | None:
+    for name, value in scope.get("headers", []):
+        if name.lower() == b"authorization":
+            return value.decode("latin-1")
+    return None
 
 
 def extract_bearer_token(header_value: str | None) -> str | None:
@@ -74,11 +92,21 @@ class OperatorAuthMiddleware:
         path = str(scope.get("path") or "")
         method = str(scope.get("method") or "GET").upper()
 
-        if (
-            method == "OPTIONS"
-            or not path.startswith("/api/")
-            or is_public_api_request(path, method)
-        ):
+        if method == "OPTIONS" or is_telemetry_ingest(path, method):
+            await self.app(scope, receive, send)
+            return
+
+        if path.startswith("/api/"):
+            token = extract_bearer_token(_authorization_header(scope))
+            if token and token.startswith(_INGESTION_CREDENTIAL_PREFIX):
+                response = JSONResponse(
+                    status_code=401,
+                    content={"detail": "Ingestion credentials cannot access operator APIs"},
+                )
+                await response(scope, receive, send)
+                return
+
+        if not path.startswith("/api/") or is_public_api_request(path, method):
             await self.app(scope, receive, send)
             return
 
@@ -87,11 +115,7 @@ class OperatorAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        authorization: str | None = None
-        for name, value in scope.get("headers", []):
-            if name.lower() == b"authorization":
-                authorization = value.decode("latin-1")
-                break
+        authorization = _authorization_header(scope)
 
         if operator_authorized(settings.operator_api_key, authorization):
             await self.app(scope, receive, send)

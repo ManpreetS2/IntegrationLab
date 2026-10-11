@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.models.github import ProviderRequestLogResponse
+from app.models.telemetry import TelemetryEventView, TelemetryObservationMetrics
 from app.models.webhook import WebhookEventSummary
 
 
@@ -29,6 +30,7 @@ class FailureSource(str, Enum):
     WEBHOOK_PROCESSING = "webhook_processing"
     FAILURE_LAB = "failure_lab"
     DIAGNOSTIC = "diagnostic"
+    SDK_TELEMETRY = "sdk_telemetry"
 
 
 class Severity(str, Enum):
@@ -101,6 +103,7 @@ class IntegrationHealth(BaseModel):
     last_checked_at: datetime | None = None
     request_metrics: RequestMetrics | None = None
     webhook_metrics: WebhookMetrics | None = None
+    telemetry_metrics: TelemetryObservationMetrics | None = None
     latest_diagnostic: DiagnosticRunBrief | None = None
 
 
@@ -129,6 +132,8 @@ class OperationalMetrics(BaseModel):
     webhook_failed: int = 0
     webhook_pending: int = 0
     diagnostic_runs: int = 0
+    sdk_reported_observations: int = 0
+    sdk_reported_errors: int = 0
 
 
 class FailureItem(BaseModel):
@@ -144,6 +149,9 @@ class FailureItem(BaseModel):
     code: str
     summary: str
     simulated: bool = False
+    provenance: str | None = None
+    service: str | None = None
+    error_category: str | None = None
     # Source-specific safe context (all optional).
     method: str | None = None
     endpoint: str | None = None
@@ -172,6 +180,7 @@ class IntegrationReliabilityDetail(IntegrationHealth):
     window_hours: int
     recent_requests: list[ProviderRequestLogResponse] = Field(default_factory=list)
     recent_webhook_events: list[WebhookEventSummary] = Field(default_factory=list)
+    recent_telemetry_events: list[TelemetryEventView] = Field(default_factory=list)
     recent_failures: list[FailureItem] = Field(default_factory=list)
 
 

@@ -247,3 +247,189 @@ def evaluate_stripe(ev: StripeEvidence) -> HealthAssessment:
         else f"All received webhooks are processed; no deliveries in the last {w}h."
     )
     return HealthAssessment(HealthState.HEALTHY, summary, evidence, None)
+
+
+@dataclass(frozen=True)
+class TelemetryEvidence:
+    """SDK-reported observations for one instrumented HTTP integration."""
+
+    active_credentials: int
+    observation_count: int
+    success_count: int
+    error_count: int
+    error_rate: float | None
+    average_latency_ms: int | None
+    p95_latency_ms: int | None
+    latest_occurred_at: datetime | None
+    latest_status_code: int | None
+    latest_error_category: str | None
+    latest_duration_ms: int | None
+    latest_route_template: str | None
+    latest_service: str | None
+    latest_method: str | None
+    failure_categories: tuple[tuple[str, int], ...]
+    has_older_observations: bool
+    window_hours: int
+
+
+_SDK_DISCLAIMER = (
+    "Figures are SDK-reported observations. IntegrationLab did not call the remote service."
+)
+
+_TELEMETRY_ACTIONS = {
+    "timeout": (
+        "Check the calling application's timeout and the upstream service. "
+        "This timeout was reported by the SDK, not measured by an IntegrationLab probe."
+    ),
+    "transport_error": (
+        "Check DNS and connectivity from the calling application to the upstream service. "
+        "IntegrationLab did not open that connection."
+    ),
+    "http_server_error": "Inspect the upstream service error. The HTTP status was reported by the SDK.",
+    "rate_limited": "Review the upstream service quota. The HTTP 429 was reported by the SDK.",
+    "http_client_error": "Review the calling application's request. The HTTP 4xx was reported by the SDK.",
+}
+
+
+def _telemetry_lines(ev: TelemetryEvidence) -> list[str]:
+    lines = [
+        _SDK_DISCLAIMER,
+        f"{ev.active_credentials} active ingestion credential(s).",
+        (
+            f"{ev.observation_count} SDK-reported observations in the last {ev.window_hours}h "
+            f"({ev.success_count} succeeded, {ev.error_count} failed)."
+        ),
+    ]
+    if ev.error_rate is not None:
+        lines.append(f"Error rate {ev.error_rate} over {ev.observation_count} observations.")
+    if ev.average_latency_ms is not None:
+        if ev.p95_latency_ms is not None:
+            latency = f"Average latency {ev.average_latency_ms}ms, p95 {ev.p95_latency_ms}ms."
+        else:
+            latency = (
+                f"Average latency {ev.average_latency_ms}ms, "
+                f"p95 not reported (fewer than {rules.INSTRUMENTED_MIN_SAMPLE_FOR_P95} observations)."
+            )
+        lines.append(latency)
+    if ev.latest_occurred_at is not None:
+        status = (
+            f"HTTP {ev.latest_status_code}" if ev.latest_status_code is not None else "no HTTP response"
+        )
+        category = f", {ev.latest_error_category}" if ev.latest_error_category else ""
+        route = ev.latest_route_template or "request"
+        lines.append(f"Latest SDK-reported {ev.latest_method or 'request'} {route}: {status}{category}.")
+    for category, count in ev.failure_categories:
+        lines.append(f"Failure category {category}: {count}.")
+    return lines
+
+
+def evaluate_instrumented_http(ev: TelemetryEvidence) -> HealthAssessment:
+    """Health from SDK-reported observations only. First matching rule wins."""
+    count = ev.observation_count
+    if ev.active_credentials == 0 and count == 0 and not ev.has_older_observations:
+        return HealthAssessment(
+            HealthState.NOT_CONFIGURED,
+            "Instrumented HTTP integration has no ingestion credential and no observed requests.",
+            [
+                "No active ingestion credential.",
+                "No SDK-reported observations are stored.",
+                _SDK_DISCLAIMER,
+            ],
+            "Create an ingestion credential and install the IntegrationLab SDK in the application that makes the HTTP calls.",
+        )
+
+    if count == 0:
+        evidence = [f"No SDK-reported observations in the last {ev.window_hours}h.", _SDK_DISCLAIMER]
+        if ev.has_older_observations:
+            evidence.insert(0, "Older observations exist outside the selected window.")
+        if ev.active_credentials == 0:
+            evidence.insert(0, "No active ingestion credential.")
+            action = "Create or rotate an ingestion credential, then send traffic from the instrumented application."
+        else:
+            evidence.insert(0, f"{ev.active_credentials} active ingestion credential(s).")
+            action = "Confirm the application is running and can reach IntegrationLab, then refresh this window."
+        return HealthAssessment(
+            HealthState.UNKNOWN,
+            "No recent SDK-reported observations in the selected window.",
+            evidence,
+            action,
+        )
+
+    evidence = _telemetry_lines(ev)
+    latest_failed = ev.latest_error_category is not None
+    if ev.success_count == 0 and count >= rules.INSTRUMENTED_ALL_FAILED_MIN:
+        return HealthAssessment(
+            HealthState.FAILED,
+            f"All {count} SDK-reported observations in the last {ev.window_hours}h failed.",
+            evidence,
+            "Inspect the calling application and the upstream service. IntegrationLab did not independently call that service.",
+        )
+
+    if (
+        count >= rules.MIN_SAMPLE_FOR_ERROR_RATE
+        and ev.error_rate is not None
+        and ev.error_rate >= rules.INSTRUMENTED_ERROR_RATE_FAILED
+        and latest_failed
+    ):
+        return HealthAssessment(
+            HealthState.FAILED,
+            (
+                f"{ev.error_count} / {count} SDK-reported observations failed in the last "
+                f"{ev.window_hours}h, including the latest request."
+            ),
+            evidence,
+            "Most recent observed traffic is failing. Check the upstream service and the application's error handling. This is not an IntegrationLab probe.",
+        )
+
+    if latest_failed:
+        status = (
+            f"HTTP {ev.latest_status_code}" if ev.latest_status_code is not None else "no HTTP response"
+        )
+        route = ev.latest_route_template or "request"
+        return HealthAssessment(
+            HealthState.DEGRADED,
+            (
+                f"Latest SDK-reported {ev.latest_method or 'request'} {route} failed "
+                f"({ev.latest_error_category}, {status})."
+            ),
+            evidence,
+            _TELEMETRY_ACTIONS.get(
+                ev.latest_error_category or "",
+                "Review the latest SDK-reported failure. IntegrationLab did not call the remote service.",
+            ),
+        )
+
+    repeated = ev.error_count >= rules.REPEATED_FAILURES_DEGRADED
+    high_rate = (
+        count >= rules.MIN_SAMPLE_FOR_ERROR_RATE
+        and ev.error_rate is not None
+        and ev.error_rate >= rules.ERROR_RATE_DEGRADED
+    )
+    if repeated or high_rate:
+        return HealthAssessment(
+            HealthState.DEGRADED,
+            (
+                f"The latest SDK-reported observation succeeded, but {ev.error_count} / {count} "
+                f"observations failed in the last {ev.window_hours}h."
+            ),
+            evidence,
+            "Review the failure categories in this window before treating the integration as healthy.",
+        )
+
+    if ev.latest_duration_ms is not None and ev.latest_duration_ms > rules.LATENCY_SLOW_MS:
+        return HealthAssessment(
+            HealthState.DEGRADED,
+            (
+                f"Latest SDK-reported observation was slow ({ev.latest_duration_ms}ms; "
+                f"local threshold {rules.LATENCY_SLOW_MS}ms)."
+            ),
+            evidence,
+            "Compare this latency with the upstream service. The figure is SDK-reported, not an IntegrationLab measurement from inside that service.",
+        )
+
+    return HealthAssessment(
+        HealthState.HEALTHY,
+        "Recent SDK-reported observations are succeeding.",
+        evidence,
+        None,
+    )

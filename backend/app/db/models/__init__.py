@@ -12,6 +12,7 @@ from app.db.models.oauth import (
     OAuthSessionORM,
     ProviderRequestLogORM,
 )
+from app.db.models.telemetry import IngestionCredentialORM, TelemetryEventORM
 from app.db.models.support import (
     OperatorAuditEventORM,
     SupportCaseEvidenceORM,
@@ -42,4 +43,6 @@ __all__ = [
     "SupportCaseNoteORM",
     "SupportCaseEvidenceORM",
     "OperatorAuditEventORM",
+    "IngestionCredentialORM",
+    "TelemetryEventORM",
 ]
