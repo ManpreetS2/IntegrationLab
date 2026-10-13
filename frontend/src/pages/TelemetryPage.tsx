@@ -5,6 +5,7 @@ import SectionStatus from '../components/SectionStatus'
 import { HealthBadge } from '../components/StatusBadges'
 import { formatCount, formatErrorRate, formatMs, formatP95, formatTime } from '../format'
 import { navigate, pageHref, useResource } from '../hooks'
+import { recordForSelection, recordsForSelection } from '../viewSelection'
 import type { Integration, TelemetryErrorCategory, TelemetryEvent } from '../types'
 
 const CATEGORIES: TelemetryErrorCategory[] = [
@@ -41,15 +42,27 @@ function TelemetryPage({
   const [appliedCategory, setAppliedCategory] = useState<TelemetryErrorCategory | ''>('')
   const [cursor, setCursor] = useState<string | undefined>(undefined)
   const [previousCursors, setPreviousCursors] = useState<Array<string | undefined>>([])
+  const [filterOwner, setFilterOwner] = useState(integrationId)
+  if (filterOwner !== integrationId) {
+    setFilterOwner(integrationId)
+    setService('')
+    setStatusCode('')
+    setCategory('')
+    setAppliedService('')
+    setAppliedStatusCode('')
+    setAppliedCategory('')
+    setCursor(undefined)
+    setPreviousCursors([])
+  }
 
   const loadHealth = useCallback(
     () => (integrationId ? getTelemetryHealth(integrationId, 24) : Promise.reject(new Error('No application'))),
     [integrationId],
   )
-  const loadEvents = useCallback(() => {
+  const loadEvents = useCallback(async () => {
     if (!integrationId) return Promise.reject(new Error('No application'))
     const parsedStatus = appliedStatusCode.trim() === '' ? undefined : Number(appliedStatusCode)
-    return listTelemetryEvents({
+    const page = await listTelemetryEvents({
       integration_id: integrationId,
       service: appliedService.trim() || undefined,
       status_code: parsedStatus !== undefined && Number.isInteger(parsedStatus) ? parsedStatus : undefined,
@@ -57,6 +70,7 @@ function TelemetryPage({
       limit: 50,
       cursor,
     })
+    return { ownerId: integrationId, records: [page] }
   }, [integrationId, appliedService, appliedStatusCode, appliedCategory, cursor])
 
   const health = useResource(integrationId ? loadHealth : null)
@@ -85,8 +99,9 @@ function TelemetryPage({
     )
   }
 
-  const metrics = health.data?.metrics
-  const page = events.data
+  const shownHealth = recordForSelection(integrationId, health.data)
+  const metrics = shownHealth?.metrics
+  const page = recordsForSelection(integrationId, events.data)?.[0]
 
   return (
     <>
@@ -101,7 +116,7 @@ function TelemetryPage({
       <section className="panel">
         <div className="panel-header">
           <h2>Application</h2>
-          {health.data ? <HealthBadge state={health.data.health} /> : null}
+          {shownHealth ? <HealthBadge state={shownHealth.health} /> : null}
         </div>
         <form className="webhook-toolbar" onSubmit={applyFilters}>
           <label>
@@ -152,17 +167,17 @@ function TelemetryPage({
       <SectionStatus
         loading={health.loading}
         error={health.error}
-        hasData={Boolean(health.data)}
+        hasData={Boolean(shownHealth)}
         onRetry={health.reload}
         loadingText="Loading SDK health…"
       />
 
-      {health.data && metrics ? (
+      {shownHealth && metrics ? (
         <section className="panel">
           <h2>Evidence-backed health</h2>
-          <p>{health.data.summary}</p>
+          <p>{shownHealth.summary}</p>
           <p className="muted small-text">
-            Provenance {health.data.provenance}. Independently verified: no. Window {health.data.window_hours}h.
+            Provenance {shownHealth.provenance}. Independently verified: no. Window {shownHealth.window_hours}h.
           </p>
           <div className="summary-grid totals-grid">
             <article className="summary-card">
@@ -218,13 +233,13 @@ function TelemetryPage({
             </ul>
           ) : null}
           <ul className="evidence-list">
-            {health.data.evidence.map((line) => (
+            {shownHealth.evidence.map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
-          {health.data.recommended_action ? (
+          {shownHealth.recommended_action ? (
             <p className="recommendation">
-              <strong>Next step:</strong> {health.data.recommended_action}
+              <strong>Next step:</strong> {shownHealth.recommended_action}
             </p>
           ) : null}
         </section>

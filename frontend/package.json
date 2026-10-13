@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test:unit": "node --experimental-strip-types --test src/lib/stripeAmount.test.ts src/theme.test.ts src/format.test.ts",
+    "test:unit": "node --experimental-strip-types --test src/lib/stripeAmount.test.ts src/theme.test.ts src/format.test.ts src/viewSelection.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

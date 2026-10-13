@@ -1,22 +1,103 @@
 # IntegrationLab
 
-**Debug broken integrations with evidence, not guesses.**
+IntegrationLab is a self-hosted console for investigating integration failures with stored evidence.
 
-IntegrationLab is a **self-hosted, single-operator integration support console** built to investigate GitHub API failures and Stripe test-mode webhooks. It brings provider requests, reliability signals, guided diagnostics, incident cases, and safe recovery workflows into one React dashboard.
+An operator can connect GitHub and Stripe, run a controlled failure simulation, and read what the system actually recorded. A separate application can also report its own HTTP outcomes through a Python or Node SDK. Those SDK reports are labeled as reports. IntegrationLab does not call the upstream service to confirm them.
+
+This is a local portfolio application. It is not a hosted monitoring service, and the SDK packages are not published to PyPI or npm.
 
 [![IntegrationLab CI](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml)
 
-![Actual IntegrationLab reliability dashboard showing integration health and diagnostic evidence](docs/assets/portfolio/linkedin/01-overview.png)
+![Light overview of IntegrationLab](docs/assets/universal-v2/release/light-overview-1600.png)
 
-*Actual local Docker Compose UI, captured during an earlier acceptance session. This is not a public cloud service or production customer monitoring.*
+*Local console, Frosted Pearl light theme. Health comes from stored evidence. Zero counts stay neutral.*
 
-**[Try it locally](#try-it-yourself) · [Screenshots](#see-it-in-action) · [Capabilities](#what-it-does) · [Architecture](#how-it-works) · [Verification](#verification) · [License & contributions](#license-and-contributions)**
+## The problem
 
-## Try it yourself
+When a third-party integration fails, the useful question is narrow: what was observed, where did that observation come from, and what should the operator do next?
 
-**You can run the entire application on your own machine.** No GitHub OAuth App, Stripe account, or AWS account is required for the simulated demo.
+Logs from the provider, webhook deliveries, and an application's own HTTP client are three different kinds of evidence. Mixing them makes a dashboard look healthier or sicker than the record supports.
 
-**Requirements:** Docker with Compose, Git, Make, and Python 3. Commands below use a macOS/Linux shell (Windows users can use WSL2 with Docker integration).
+## What it does
+
+- Keeps GitHub OAuth connection state and real `GET /user` request logs separate from simulations.
+- Verifies Stripe webhook signatures on the raw body, stores the delivery, and processes it in a later recorded attempt.
+- Treats a repeated delivery as a duplicate. A later event for the same object can still be a new event.
+- Runs Failure Lab scenarios that are marked simulated and excluded from provider health.
+- Opens a support case with pinned evidence, notes, and an audit trail.
+- Registers an instrumented application, issues an ingestion credential once, and shows the HTTP outcomes that application reported.
+
+## Universal Monitoring v2
+
+An application outside this repository uses the local Python or Node SDK to report sanitized HTTP outcomes: method, route template, status, duration, and a failure category. Query strings, bodies, cookies, and authorization headers are not stored.
+
+The console shows those rows on **Telemetry**, not on the provider request log.
+
+| What you see | What it means |
+| --- | --- |
+| `registered` | The application record exists. No active ingestion credential. This is not an OAuth connection. |
+| `instrumented` | At least one ingestion credential is active. |
+| `sdk_reported` | The application sent this observation. IntegrationLab did not call the remote service. |
+| Error rate `Unavailable` | There were no observations in the window. That is not a 0% error rate. |
+| p95 `Unavailable` | Fewer than 20 observations. The percentile is withheld. |
+| Health `unknown` | Nothing was reported in the window. Silence is not health. |
+
+Switching the selected application hides the previous application's credential prefixes and telemetry until the new response arrives.
+
+![SDK-reported telemetry in the light theme](docs/assets/universal-v2/release/light-telemetry-1600.png)
+
+## GitHub and Stripe
+
+GitHub uses an OAuth App with PKCE. Tokens stay on the server. Diagnostics for GitHub can make one real `GET /user` call when the operator runs them.
+
+Stripe uses one webhook signing secret for the process. The console shows the local endpoint and whether verification is configured. It does not show the signing secret. Duplicate deliveries are counted separately from failed processing.
+
+Failure Lab, guided diagnostics, GitHub OAuth, and the Stripe webhook receiver are unavailable for instrumented applications. The UI disables those actions instead of pretending they apply.
+
+![Stripe webhook investigation](docs/assets/universal-v2/release/stripe-webhooks-1600.png)
+
+## Light and dark
+
+The same screens use Frosted Pearl in light mode and Graphite Glass in dark mode. System follows the operating system, including a later change. The choice is stored in this browser.
+
+![Dark overview](docs/assets/universal-v2/release/dark-overview-1600.png)
+
+![Telemetry on a phone, light](docs/assets/universal-v2/release/light-telemetry-mobile.png)
+
+![Telemetry on a phone, dark](docs/assets/universal-v2/release/dark-telemetry-mobile.png)
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Operator[Operator browser] --> UI[React console]
+    UI --> API[FastAPI]
+    App[Your application] --> SDK[Python or Node SDK]
+    SDK -->|Ingestion credential| API
+    API --> DB[(PostgreSQL)]
+    API -->|Operator-triggered REST| GitHub[GitHub API]
+    Stripe[Stripe test webhooks] -->|Signed raw body| API
+```
+
+The operator key and the ingestion credential are different secrets. The browser never calls the telemetry ingestion endpoint. The ingestion credential is shown once, at create or rotate, and is not written to browser storage.
+
+Webhook receipt and webhook processing are separate. Processing is operator-triggered. There is no always-on worker.
+
+## Stack
+
+| Layer | Choice |
+| --- | --- |
+| Interface | React 19, TypeScript, Vite, custom CSS |
+| API | Python, FastAPI, Pydantic, SQLAlchemy |
+| Data | PostgreSQL 18, Alembic |
+| SDKs | Local Python package `integrationlab` and Node package `@integrationlab/sdk` |
+| Local run | Docker Compose, or a virtualenv plus PostgreSQL |
+| CI | GitHub Actions: backend tests, frontend quality, both container builds, Compose smoke, Terraform validate |
+| AWS | Terraform is formatted and validated in CI. It has not been applied. |
+
+## Five-minute local start
+
+Requirements: Docker with Compose, Git, and Python 3.
 
 ```bash
 git clone https://github.com/ManpreetS2/IntegrationLab.git
@@ -25,159 +106,133 @@ export OPERATOR_API_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsa
 make demo
 ```
 
-Open **http://localhost:8080**. The dashboard will ask you to unlock it using the generated operator key. To see that key in your own terminal, use `echo "$OPERATOR_API_KEY"`. Keep it private.
+Open http://localhost:8080 and enter that operator key. `echo "$OPERATOR_API_KEY"` prints it again. Do not commit it.
 
-**What the demo gives you:**
-- A running React UI, FastAPI service, PostgreSQL database, and applied migrations via Docker Compose.
-- Example GitHub and Stripe integration records.
-- Deterministic **simulated** 401, 429, 500, and timeout failures with evidence-based diagnoses.
-- A saved Stripe configuration/diagnostic result to explore in the UI.
+`make demo` starts the console, API, and database, then loads GitHub and Stripe demo records and labeled simulations. It does not connect a live GitHub account or deliver a Stripe webhook.
 
-`make demo` does **not** connect a real GitHub account, deliver a real Stripe webhook, or populate production traffic. You can explore the dashboard first and set up live provider tests later.
-
-To stop the demo **without removing its database volume**:
+Stop the stack without deleting the database:
 
 ```bash
 docker compose -f docker-compose.full.yml down
 ```
 
-To intentionally reset the demo **and delete its local database volume**, run `make compose-down`.
+`make compose-down` and `make smoke` delete the Compose volume. Do not run them against a database you want to keep.
 
-### Connect your own test integrations
+To exercise a real GitHub OAuth App or Stripe CLI forwarding, use [docs/external-acceptance.md](docs/external-acceptance.md).
 
-The demo is optional. To exercise **real GitHub OAuth** or **Stripe test-mode signed webhooks**, configure your own provider credentials and follow the [step-by-step external acceptance runbook](docs/external-acceptance.md).
+## Python SDK
 
-- **GitHub:** Register an OAuth App with the exact local callback, configure `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `TOKEN_ENCRYPTION_KEY`, then authorize and check your own connection.
-- **Stripe:** Use Stripe CLI in **test mode**, forward signed webhooks to your IntegrationLab endpoint, set `STRIPE_WEBHOOK_SECRET`, and inspect durable receipt, duplicates, processing, and failures.
-- **Security:** Use a strong `OPERATOR_API_KEY` whenever provider credentials are configured. Never commit `.env` files or share credentials in screenshots.
-
-Both integrations were previously exercised against real providers using this local Compose application; see [verification evidence](docs/verification.md). Running the simulated demo by itself is not external provider verification.
-
-### Can I add IntegrationLab to an existing application?
-
-**Not as a copy-paste plugin today.** This repository is a **standalone application**, not a published Python package, JavaScript SDK, generic API gateway, or drop-in payment integration.
-
-You can run it separately to learn and test its existing GitHub and Stripe workflows. To reuse its webhook-processing approach inside another application, a developer would need to adapt the API routes, authentication, event handlers, database models, and domain-specific business effects. The included Stripe handlers record internal demo effects; they do not automatically connect to another product's payment or order system.
-
-The intended first experience is **clone → `make demo` → explore**, without any code changes.
-
-## See it in action
-
-The following are real screenshots of the running local application. Captions distinguish **real provider evidence** from **synthetic/demo events**.
-
-### 1. Reliability overview
-
-The full-width dashboard image at the top of this README shows evidence-derived health: missing observations never become invented uptime, and Failure Lab simulations do not change live health.
-
-### 2. Inspect real GitHub API evidence
-
-The Requests view records safe endpoint labels, HTTP status codes, request latency, and whether an observation was real or simulated. This screenshot comes from an earlier **real GitHub OAuth/REST acceptance** session.
-
-![IntegrationLab real GitHub provider request table showing status codes and latency](docs/assets/portfolio/03-real-provider-request.png)
-
-### 3. Follow Stripe webhook processing
-
-The Webhooks view shows received events, processing states, and duplicate deliveries. **This screenshot uses locally HMAC-signed synthetic test events**, not a fresh Stripe CLI delivery.
-
-![IntegrationLab Stripe test webhook dashboard with processed and duplicate event counts](docs/assets/portfolio/linkedin/04-stripe-webhook.png)
-
-### 4. Investigate the failed queue
-
-Review a failed processing attempt, inspect its reason, and locate the operator's Retry/Dismiss controls. The event shown here is **synthetic test data**; the classification and UI workflow are implemented.
-
-![Failed Stripe webhook processing details and retry dismissal controls](docs/assets/portfolio/linkedin/05-failed-queue.png)
-
-### 5. Organize a support case
-
-A support case links evidence, notes, severity, lifecycle status, correlation IDs, and a derived timeline. This screenshot explicitly labels **SIMULATED Failure Lab** evidence and is **not a real customer outage**.
-
-![IntegrationLab support case with simulated pinned evidence and investigation timeline](docs/assets/portfolio/linkedin/03-support-case.png)
-
-[More screenshot provenance and the complete LinkedIn image set](docs/assets/portfolio/linkedin/README.md)
-
-## What it does
-
-| Feature | What you can inspect or demonstrate |
-| --- | --- |
-| **GitHub OAuth and REST** | Authorization code + state/PKCE, encrypted access tokens, connection checks and real `GET /user` request evidence |
-| **Stripe webhook reliability** | Signature verification on the raw body, durable receipt, delivery deduplication, idempotent internal effects and processing attempts |
-| **Retry and recovery** | Bounded retry policy, persisted failures, inspectable failed-event queue and operator-triggered recovery |
-| **Failure Lab** | Reproducible simulated failures and deterministic diagnoses without changing real provider health |
-| **Reliability and diagnostics** | Passive evidence-derived health; explicit operator-triggered diagnostics instead of unannounced provider calls |
-| **Support cases and audit** | Pinned evidence, status transitions, timelines, correlation IDs, and secret-safe operator audit metadata |
-
-## How it works
-
-```mermaid
-flowchart LR
-    User[Operator browser] --> Edge[React / nginx]
-    Edge --> API[FastAPI]
-    API --> DB[(PostgreSQL)]
-    API -->|Authenticated REST requests| GH[GitHub API]
-    Stripe[Stripe test-mode webhooks] -->|Signed events| Edge
-    DB <--> Processor[Operator/CLI-triggered webhook processing]
-    API --> Diagnosis[Evidence-based health and diagnostics]
-    API --> Cases[Support cases and audit]
-```
-
-Three boundaries matter:
-
-1. **Webhook delivery is not webhook processing.** Validate the signature against the original body, store the event durably, acknowledge receipt, then process it separately through bounded, recorded attempts.
-2. **Delivery deduplication is not the same as business-effect idempotency.** Repeated delivery of one event must not reapply its effect; separate events for the same object can be legitimate.
-3. **Simulated evidence is not live provider evidence.** Failure Lab records are visibly marked and excluded from provider health aggregation.
-
-Processing is **operator/CLI-triggered**, not an always-on background worker. The system is designed as a local, single-operator portfolio console, not a multi-tenant production SaaS.
-
-### Stack
-
-| Layer | Technology |
-| --- | --- |
-| Frontend | React, TypeScript, Vite, nginx |
-| Backend | Python, FastAPI, SQLAlchemy, Pydantic |
-| Database | PostgreSQL 18, Alembic |
-| Local runtime | Docker Compose |
-| CI | GitHub Actions: backend, frontend, containers, assembled-stack smoke, Terraform |
-| Optional AWS design | Terraform for CloudFront, S3, ALB, ECS/Fargate, RDS, Secrets Manager and GitHub OIDC |
-
-**AWS has not been deployed.** The Terraform architecture was formatted and validated in CI, but no `terraform apply` or cloud-runtime acceptance was performed. See the [full architecture](docs/architecture.md), [AWS deployment design](docs/aws-deployment.md), and [architecture decision records](docs/adr/).
-
-## Verification
-
-**Verified in October 2026:**
-
-- **331 backend tests passed**, including OAuth, webhook signature handling, concurrency, idempotency, retries, diagnostics and support operations.
-- **5 frontend unit tests passed**, plus frontend lint and production build.
-- **6/6 CI jobs passed**, including the full-stack Compose smoke test with operator authentication and persisted Failure Lab/support-case flows.
-- **Separate external acceptance** verified real GitHub OAuth / REST calls, Stripe CLI-signed webhook receipt, duplicate absorption, a failed event, and provider-evidence support cases.
-- **Manual Stripe retry/dismiss and AWS live deployment are not externally verified**; automated coverage and implementation do not imply otherwise.
-
-[GitHub Actions results](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml) · [Exact claim-to-evidence matrix](docs/verification.md) · [External acceptance runbook](docs/external-acceptance.md)
-
-For contributors with the project dependencies installed:
+Install from this checkout. The package is not on PyPI.
 
 ```bash
-make verify       # Backend tests, frontend quality, Terraform validation
-make full-verify  # Above + Docker Compose integration smoke
+python -m pip install -e sdk/python
 ```
 
-**Caution:** the full-stack smoke workflow removes its temporary Compose database volume when it finishes. Keep important demo data in a separate stack.
+```python
+from integrationlab import IntegrationLabClient
 
-## Engineering decisions
+with IntegrationLabClient.from_env() as lab:
+    with lab.observe(service="orders-api", method="GET", route_template="/v1/orders/{id}") as obs:
+        response = call_your_client()
+        obs.set_status(response.status_code)
+    lab.flush()
+```
 
-- **Why PostgreSQL instead of Redis/Kafka?** Durable receipts, concurrency-safe claims, attempts, and idempotent effects are sufficient at this project's scale without another infrastructure dependency.
-- **Why deterministic diagnostics?** Operators can trace recommendations back to actual observations; the interface does not invent a root cause.
-- **Why support cases?** A request log gives one symptom; pinned evidence, notes, status, and correlation preserve an investigation.
-- **Why operator-triggered processing?** It demonstrates the receipt/processing boundary without pretending an always-running worker exists.
-- **Why explicit limitations?** This is not a multi-tenant platform. It has no per-user RBAC, always-on worker, default WAF/rate limiting, or per-integration Stripe signing secrets.
+Set these in the application process, not in the browser:
 
-[Threat model](docs/threat-model.md) · [Support operations](docs/support-operations.md) · [Engineering ADRs](docs/adr/) · [Deferred Phase 2 backlog](docs/phase-2-backlog.md)
+```bash
+export INTEGRATIONLAB_BASE_URL=http://127.0.0.1:8000
+export INTEGRATIONLAB_INTEGRATION_ID=<integration-uuid>
+export INTEGRATIONLAB_INGESTION_CREDENTIAL=<paste the one-time credential>
+export INTEGRATIONLAB_ENVIRONMENT=local
+```
 
-## License and contributions
+`examples/universal-monitoring/` is a separate program. It calls a local fixture that returns 200, 429, 500, and a hang, then reports those outcomes. `python3 examples/universal-monitoring/accept.py` runs that path against a database whose name ends in `_test` and an API on port 8010.
 
-IntegrationLab is open-source software under the **[MIT License](LICENSE)**. You may clone, modify, and reuse the source code under that license's conditions. It is an application, **not** a drop-in SDK; using the integration handlers with your own product still requires application-specific work.
+## Node SDK
 
-Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md) for a no-credentials demo, bug-report instructions, and scoped PR guidance. For responsible vulnerability reporting and local-demo security limitations, read [SECURITY.md](SECURITY.md). v1 is feature-complete, so additions are not required to run or demonstrate IntegrationLab.
+Install and build from this checkout. The package is not on npm.
 
-## More documentation
+```bash
+cd sdk/typescript && npm install && npm run build
+```
 
-[60-second demo and technical walkthrough](docs/demo-script.md) · [Customer case study](docs/customer-case-study.md) · [Interview Q&A](docs/interview-questions.md) · [Resume bullets](docs/resume-bullets.md) · [LinkedIn post draft](docs/linkedin-post.md)
+```javascript
+import { IntegrationLabClient } from "@integrationlab/sdk";
+
+const lab = IntegrationLabClient.fromEnv();
+const fetchObserved = lab.instrumentFetch(fetch, {
+  service: "orders-api",
+  routeTemplate: "/v1/orders/{id}",
+});
+const response = await fetchObserved("https://upstream.example/v1/orders/123");
+await lab.close();
+```
+
+Use the same environment variables as the Python SDK. `fromEnv()` rejects an operator key that was passed in as the ingestion credential.
+
+## Demo walkthrough
+
+1. Unlock the console with the operator key.
+2. On Overview, read health. A zero is neutral. A failed or degraded integration names the stored evidence.
+3. On Integrations, create an Instrumented HTTP application. Status becomes Registered.
+4. Generate an ingestion credential. Copy it from the dialog. Close the dialog. The list shows the prefix only.
+5. Point the Python sample at that integration and run it.
+6. Open Telemetry. The banner says the rows are SDK-reported. Expect degraded health for the fixture: successes, a 429, a 500, and a timeout. p95 stays unavailable.
+7. Open Failures and filter to SDK-reported. The source is `sdk_telemetry`.
+8. Rotate the credential. The previous secret is rejected. Revoke the replacement. Status returns to Registered. The historical rows remain.
+9. Open Requests, Webhooks, Diagnostics, and Support Cases for the GitHub and Stripe records. Those pages are the provider workflows, not the SDK feed.
+
+A shot list for a 60–90 second recording is in [docs/v2-demo-script.md](docs/v2-demo-script.md).
+
+## Tests and CI
+
+From a checkout with the backend virtualenv and frontend dependencies:
+
+```bash
+cd backend && python -m pytest -q
+cd frontend && npm run lint && npm run test:unit && npm run build
+cd sdk/python && PYTHONPATH=src python -m pytest tests -q
+cd sdk/typescript && npm test
+python3 examples/universal-monitoring/accept.py
+```
+
+Pytest and the acceptance script use a database whose name ends in `_test`. They refuse the application database.
+
+GitHub Actions runs six jobs: backend tests, frontend quality, backend image, frontend image, Compose smoke, and Terraform validate. The smoke job builds its own stack and deletes that stack's volume when it finishes.
+
+The claim-to-evidence notes for the earlier GitHub OAuth and Stripe CLI sessions are in [docs/verification.md](docs/verification.md). Those sessions were local. They are not a public production deployment.
+
+## Security boundaries
+
+- The operator key unlocks the console. The ingestion credential only submits telemetry.
+- An ingestion credential presented to an operator route is rejected. An operator key presented as an ingestion credential is rejected.
+- A credential for one integration cannot submit events for another.
+- The server stores a SHA-256 of the ingestion secret. The secret itself is returned only from create and rotate.
+- Stripe signatures are checked against the raw body. The signing secret is an environment variable, not a field in the UI.
+- Route templates are stored. Full URLs, query strings, bodies, cookies, and authorization headers are not.
+- One operator. No per-user RBAC, no tenant isolation, no default WAF, and one Stripe signing secret per process.
+
+Details and the things this model does not claim are in [docs/threat-model.md](docs/threat-model.md) and [SECURITY.md](SECURITY.md).
+
+## Known limitations
+
+- SDK observations are not an independent probe of the upstream service.
+- p95 latency is withheld below 20 observations.
+- Diagnostics do not run for instrumented applications.
+- Webhook processing does not run by itself.
+- AWS Terraform has been validated, not applied.
+- The Python and Node SDKs are installed from this repository only.
+- `localhost:8080` is your machine. There is no public hosted demo.
+
+## Roadmap
+
+The useful next steps are narrower than a new platform: publish the SDKs only after a real package release, split Stripe signing secrets per integration, and add an operator-visible worker only when processing is actually continuous. Until then, those items stay out of the product.
+
+[Deferred backlog](docs/phase-2-backlog.md) · [Architecture](docs/architecture.md) · [Universal monitoring contract](docs/contracts/universal-telemetry-v1.md) · [ADRs](docs/adr/)
+
+## License
+
+[MIT License](LICENSE). Copyright (c) 2026 Manpreet Singh.
+
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)

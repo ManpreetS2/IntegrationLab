@@ -9,6 +9,7 @@ import {
 import { formatIntegrationStatus, formatTime } from '../format'
 import { pageHref } from '../hooks'
 import type { IngestionCredentialCreated, IngestionCredentialView, Integration } from '../types'
+import { recordsForSelection, type ScopedLoad } from '../viewSelection'
 import CredentialRevealDialog from './CredentialRevealDialog'
 import SdkSetup from './SdkSetup'
 
@@ -24,28 +25,34 @@ function InstrumentedApps({
     ? selectedId
     : (integrations[0]?.id ?? '')
   const selected = integrations.find((item) => item.id === resolvedId) ?? null
-  const [credentials, setCredentials] = useState<IngestionCredentialView[]>([])
-  const [loading, setLoading] = useState(Boolean(integrations[0]?.id))
-  const [error, setError] = useState<string | null>(null)
+  const [credentialLoad, setCredentialLoad] = useState<ScopedLoad<IngestionCredentialView> | null>(null)
+  const [loadError, setLoadError] = useState<{ ownerId: string; message: string } | null>(null)
   const [label, setLabel] = useState('')
   const [busy, setBusy] = useState(false)
   const [revealed, setRevealed] = useState<IngestionCredentialCreated | null>(null)
+  const [trackedId, setTrackedId] = useState(resolvedId)
+  if (trackedId !== resolvedId) {
+    setTrackedId(resolvedId)
+    setRevealed(null)
+    setLabel('')
+  }
+  const credentials = recordsForSelection(resolvedId, credentialLoad)
+  const visibleCredentials = credentials ?? []
 
   useEffect(() => {
     if (!resolvedId) return
+    const requestedId = resolvedId
     let cancelled = false
-    listIngestionCredentials(resolvedId).then(
+    listIngestionCredentials(requestedId).then(
       (items) => {
         if (cancelled) return
-        setCredentials(items)
-        setError(null)
-        setLoading(false)
+        setCredentialLoad({ ownerId: requestedId, records: items })
+        setLoadError((current) => (current?.ownerId === requestedId ? null : current))
       },
       (err: unknown) => {
         if (cancelled) return
-        setCredentials([])
-        setError(explainApiError(err, 'Unable to load ingestion credentials.'))
-        setLoading(false)
+        setCredentialLoad({ ownerId: requestedId, records: [] })
+        setLoadError({ ownerId: requestedId, message: explainApiError(err, 'Unable to load ingestion credentials.') })
       },
     )
     return () => {
@@ -60,54 +67,57 @@ function InstrumentedApps({
   async function createCredential() {
     if (!selected) return
     setBusy(true)
-    setError(null)
+    setLoadError(null)
     try {
       const created = await createIngestionCredential(selected.id, label.trim() || undefined)
       setLabel('')
       setRevealed(created)
-      setCredentials(await listIngestionCredentials(selected.id))
+      setCredentialLoad({ ownerId: selected.id, records: await listIngestionCredentials(selected.id) })
+      setLoadError(null)
       onChanged()
     } catch (err) {
-      setError(explainApiError(err, 'Unable to create an ingestion credential.'))
+      setLoadError({ ownerId: selected.id, message: explainApiError(err, 'Unable to create an ingestion credential.') })
     } finally {
       setBusy(false)
     }
   }
 
   async function rotate(credential: IngestionCredentialView) {
-    if (!selected) return
+    if (!selected || credential.integration_id !== selected.id) return
     const confirmed = window.confirm(
       'Rotate this credential? The current secret stops working immediately. The replacement is shown once.',
     )
     if (!confirmed) return
     setBusy(true)
-    setError(null)
+    setLoadError(null)
     try {
       const created = await rotateIngestionCredential(selected.id, credential.id)
       setRevealed(created)
-      setCredentials(await listIngestionCredentials(selected.id))
+      setCredentialLoad({ ownerId: selected.id, records: await listIngestionCredentials(selected.id) })
+      setLoadError(null)
       onChanged()
     } catch (err) {
-      setError(explainApiError(err, 'Unable to rotate the credential.'))
+      setLoadError({ ownerId: selected.id, message: explainApiError(err, 'Unable to rotate the credential.') })
     } finally {
       setBusy(false)
     }
   }
 
   async function revoke(credential: IngestionCredentialView) {
-    if (!selected) return
+    if (!selected || credential.integration_id !== selected.id) return
     const confirmed = window.confirm(
       'Revoke this credential? Applications using it can no longer report observations. Revoking the last active credential returns the integration to Registered.',
     )
     if (!confirmed) return
     setBusy(true)
-    setError(null)
+    setLoadError(null)
     try {
       await revokeIngestionCredential(selected.id, credential.id)
-      setCredentials(await listIngestionCredentials(selected.id))
+      setCredentialLoad({ ownerId: selected.id, records: await listIngestionCredentials(selected.id) })
+      setLoadError(null)
       onChanged()
     } catch (err) {
-      setError(explainApiError(err, 'Unable to revoke the credential.'))
+      setLoadError({ ownerId: selected.id, message: explainApiError(err, 'Unable to revoke the credential.') })
     } finally {
       setBusy(false)
     }
@@ -125,7 +135,9 @@ function InstrumentedApps({
     )
   }
 
-  const active = credentials.filter((item) => !item.revoked_at)
+  const active = visibleCredentials.filter((item) => !item.revoked_at)
+  const error = loadError?.ownerId === resolvedId ? loadError.message : null
+  const loading = credentials === null
 
   return (
     <section className="panel">
@@ -183,10 +195,10 @@ function InstrumentedApps({
         </p>
       ) : null}
       {loading ? <p className="loading-text">Loading credentials…</p> : null}
-      {!loading && credentials.length === 0 ? (
+      {credentials !== null && credentials.length === 0 && !error ? (
         <p className="empty-state">No credentials yet. Generate one to move this application to Instrumented.</p>
       ) : null}
-      {credentials.length > 0 ? (
+      {credentials !== null && credentials.length > 0 ? (
         <div className="table-wrap">
           <table className="integrations-table">
             <thead>
@@ -200,7 +212,7 @@ function InstrumentedApps({
               </tr>
             </thead>
             <tbody>
-              {credentials.map((item) => (
+              {visibleCredentials.map((item) => (
                 <tr key={item.id}>
                   <td>{item.label ?? '—'}</td>
                   <td>
@@ -266,7 +278,10 @@ function InstrumentedApps({
       ) : null}
 
       <SdkSetup integrationId={selected.id} environment={selected.environment} />
-      <CredentialRevealDialog created={revealed} onClose={closeReveal} />
+      <CredentialRevealDialog
+        created={revealed?.integration_id === selected.id ? revealed : null}
+        onClose={closeReveal}
+      />
     </section>
   )
 }
