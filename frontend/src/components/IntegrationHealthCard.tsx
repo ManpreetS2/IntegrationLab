@@ -1,4 +1,5 @@
-import { formatCount, formatMs, formatTime } from '../format'
+import { useState } from 'react'
+import { formatCount, formatErrorRate, formatMs, formatP95, formatProvider, formatTime } from '../format'
 import { pageHref } from '../hooks'
 import type { IntegrationHealth, RequestMetrics, WebhookMetrics } from '../types'
 import { CheckBadge, HealthBadge } from './StatusBadges'
@@ -51,7 +52,8 @@ function StripeFacts({ metrics, windowHours }: { metrics: WebhookMetrics; window
       <div>
         <dt>Pending · Retry · Failed</dt>
         <dd>
-          {metrics.pending} · {metrics.retry_scheduled} · {metrics.failed}
+          {metrics.pending} · {metrics.retry_scheduled} ·{' '}
+          <span className={metrics.failed > 0 ? 'is-alert' : undefined}>{metrics.failed}</span>
         </dd>
       </div>
       <div>
@@ -66,52 +68,109 @@ function StripeFacts({ metrics, windowHours }: { metrics: WebhookMetrics; window
   )
 }
 
-function IntegrationHealthCard({ item, windowHours }: { item: IntegrationHealth; windowHours: number }) {
+function TelemetryFacts({ item }: { item: IntegrationHealth }) {
+  const metrics = item.telemetry_metrics
+  if (!metrics) return null
   return (
-    <article className={`health-card health-card-${item.health}`}>
-      <header className="health-card-header">
-        <div>
-          <h3>{item.name}</h3>
-          <p className="muted small-text">
-            <span className="provider-cell">{item.provider}</span> · {item.configuration}
-          </p>
-        </div>
-        <HealthBadge state={item.health} />
-      </header>
+    <dl className="fact-grid">
+      <div>
+        <dt>SDK observations</dt>
+        <dd>
+          {metrics.request_count === 0
+            ? 'None in this window'
+            : `${metrics.error_count} / ${metrics.request_count} errors`}
+        </dd>
+      </div>
+      <div>
+        <dt>Error rate</dt>
+        <dd>{formatErrorRate(metrics.error_rate)}</dd>
+      </div>
+      <div>
+        <dt>Average latency</dt>
+        <dd>{formatMs(metrics.average_latency_ms)}</dd>
+      </div>
+      <div>
+        <dt>p95 latency</dt>
+        <dd>{formatP95(metrics.p95_latency_ms, metrics.sample_count)}</dd>
+      </div>
+    </dl>
+  )
+}
 
-      <p className="health-summary">{item.summary}</p>
+function IntegrationHealthCard({
+  item,
+  windowHours,
+  defaultOpen = false,
+}: {
+  item: IntegrationHealth
+  windowHours: number
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const initial = item.provider.slice(0, 1).toUpperCase()
 
-      {item.request_metrics ? <GitHubFacts metrics={item.request_metrics} windowHours={windowHours} /> : null}
-      {item.webhook_metrics ? <StripeFacts metrics={item.webhook_metrics} windowHours={windowHours} /> : null}
-
-      {item.evidence.length > 0 ? (
-        <ul className="evidence-list">
-          {item.evidence.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      {item.recommended_action ? (
-        <p className="recommendation">
-          <strong>Next step:</strong> {item.recommended_action}
-        </p>
-      ) : null}
-
-      <footer className="health-card-footer">
-        <span className="muted small-text">
-          Last diagnostic:{' '}
-          {item.latest_diagnostic ? (
-            <>
-              <CheckBadge status={item.latest_diagnostic.overall_status} />{' '}
-              {formatTime(item.latest_diagnostic.started_at)}
-            </>
-          ) : (
-            'never run'
-          )}
+  return (
+    <article className="health-row">
+      <button type="button" className="health-row-main" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span className={`provider-mark provider-mark-${item.provider}`} aria-hidden="true">
+          {initial}
         </span>
-        <a href={pageHref('diagnostics', { integration: item.integration_id })}>Run diagnostics →</a>
-      </footer>
+        <span className="health-row-copy">
+          <strong>{item.name}</strong>
+          <span>
+            {formatProvider(item.provider)} · {item.summary}
+          </span>
+        </span>
+        <HealthBadge state={item.health} />
+      </button>
+      {open ? (
+        <div className="health-row-detail">
+          {item.request_metrics ? <GitHubFacts metrics={item.request_metrics} windowHours={windowHours} /> : null}
+          {item.webhook_metrics ? <StripeFacts metrics={item.webhook_metrics} windowHours={windowHours} /> : null}
+          {item.telemetry_metrics ? <TelemetryFacts item={item} /> : null}
+          {item.provider === 'instrumented_http' ? (
+            <p className="muted small-text">SDK-reported. IntegrationLab did not call the upstream service.</p>
+          ) : null}
+          {item.evidence.length > 0 ? (
+            <ul className="evidence-list">
+              {item.evidence.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
+          {item.recommended_action ? (
+            <p className="recommendation">
+              <strong>Next step:</strong> {item.recommended_action}
+            </p>
+          ) : null}
+          <footer className="health-card-footer">
+            {item.provider === 'instrumented_http' ? (
+              <span className="muted small-text">Diagnostics are not available for instrumented applications.</span>
+            ) : (
+              <span className="muted small-text">
+                Last diagnostic:{' '}
+                {item.latest_diagnostic ? (
+                  <>
+                    <CheckBadge status={item.latest_diagnostic.overall_status} />{' '}
+                    {formatTime(item.latest_diagnostic.started_at)}
+                  </>
+                ) : (
+                  'never run'
+                )}
+              </span>
+            )}
+            <a
+              href={
+                item.provider === 'instrumented_http'
+                  ? pageHref('telemetry', { integration: item.integration_id })
+                  : pageHref('diagnostics', { integration: item.integration_id })
+              }
+            >
+              {item.provider === 'instrumented_http' ? 'Open telemetry' : 'Open diagnostics'}
+            </a>
+          </footer>
+        </div>
+      ) : null}
     </article>
   )
 }

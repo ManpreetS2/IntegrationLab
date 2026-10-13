@@ -1,11 +1,9 @@
+import { formatIntegrationStatus, formatProvider } from '../format'
+import { pageHref } from '../hooks'
 import type { Integration } from '../types'
 
 interface IntegrationsTableProps {
   integrations: Integration[]
-}
-
-function formatStatus(status: Integration['status']): string {
-  return status.replaceAll('_', ' ')
 }
 
 function formatTimestamp(value: string | null): string {
@@ -35,11 +33,17 @@ function IntegrationsTable({ integrations }: IntegrationsTableProps) {
         <tbody>
           {integrations.map((integration) => (
             <tr key={integration.id}>
-              <td className="provider-cell">{integration.provider}</td>
-              <td>{integration.name}</td>
+              <td className="provider-cell">{formatProvider(integration.provider)}</td>
+              <td>
+                {integration.provider === 'instrumented_http' ? (
+                  <a href={pageHref('telemetry', { integration: integration.id })}>{integration.name}</a>
+                ) : (
+                  integration.name
+                )}
+              </td>
               <td>
                 <span className={`status-pill status-${integration.status}`}>
-                  {formatStatus(integration.status)}
+                  {formatIntegrationStatus(integration.status)}
                 </span>
               </td>
               <td>{formatTimestamp(integration.last_checked_at)}</td>

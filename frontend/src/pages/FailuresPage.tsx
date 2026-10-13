@@ -6,12 +6,13 @@ import SectionStatus from '../components/SectionStatus'
 import { useResource } from '../hooks'
 import type { FailureSource, Integration, IntegrationProvider } from '../types'
 
-type FailureFilter = 'all' | 'github' | 'stripe' | 'failure_lab' | 'diagnostic'
+type FailureFilter = 'all' | 'github' | 'stripe' | 'sdk_telemetry' | 'failure_lab' | 'diagnostic'
 
 const FILTERS: { id: FailureFilter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'github', label: 'GitHub API' },
   { id: 'stripe', label: 'Stripe processing' },
+  { id: 'sdk_telemetry', label: 'SDK-reported' },
   { id: 'diagnostic', label: 'Diagnostics' },
   { id: 'failure_lab', label: 'Failure Lab (simulation)' },
 ]
@@ -20,6 +21,7 @@ const FILTER_PARAMS: Record<FailureFilter, { provider?: IntegrationProvider; sou
   all: {},
   github: { provider: 'github', source: 'provider_request' },
   stripe: { provider: 'stripe', source: 'webhook_processing' },
+  sdk_telemetry: { provider: 'instrumented_http', source: 'sdk_telemetry' },
   diagnostic: { source: 'diagnostic' },
   failure_lab: { source: 'failure_lab' },
 }

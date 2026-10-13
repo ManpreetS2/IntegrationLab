@@ -3,7 +3,7 @@ import { getDiagnosticRun, getIntegrationReliability, listDiagnosticRuns, runDia
 import SectionStatus from '../components/SectionStatus'
 import { CheckBadge, HealthBadge } from '../components/StatusBadges'
 import { formatMs, formatTime } from '../format'
-import { errorMessage, navigate, useResource } from '../hooks'
+import { errorMessage, navigate, pageHref, useResource } from '../hooks'
 import type { DiagnosticRun, Integration } from '../types'
 
 interface DiagnosticsPageProps {
@@ -103,6 +103,7 @@ function DiagnosticsPage({ integrations, requestedIntegrationId }: DiagnosticsPa
 
   const current = health.data
   const displayedRun = run.data && run.data.id === selectedRunId ? run.data : null
+  const instrumented = integration?.provider === 'instrumented_http'
 
   return (
     <>
@@ -130,10 +131,23 @@ function DiagnosticsPage({ integrations, requestedIntegrationId }: DiagnosticsPa
               ))}
             </select>
           </label>
-          <button type="button" onClick={() => void handleRun()} disabled={running || !integrationId}>
-            {running ? 'Running diagnostics…' : 'Run diagnostics'}
-          </button>
+          {instrumented ? (
+            <button type="button" disabled>
+              Diagnostics unavailable
+            </button>
+          ) : (
+            <button type="button" onClick={() => void handleRun()} disabled={running || !integrationId}>
+              {running ? 'Running diagnostics…' : 'Run diagnostics'}
+            </button>
+          )}
         </div>
+        {instrumented ? (
+          <p className="muted">
+            Instrumented applications do not support guided diagnostics, GitHub OAuth, Stripe webhooks, or
+            Failure Lab. Health comes from stored SDK observations on{' '}
+            <a href={pageHref('telemetry', { integration: integration.id })}>Telemetry</a>.
+          </p>
+        ) : null}
         {runError ? (
           <p className="error-text" role="alert">
             {runError}
@@ -169,6 +183,7 @@ function DiagnosticsPage({ integrations, requestedIntegrationId }: DiagnosticsPa
         ) : null}
       </section>
 
+      {instrumented ? null : (
       <div className="diagnostics-layout">
         <section className="panel">
           <h2>Previous runs</h2>
@@ -223,6 +238,7 @@ function DiagnosticsPage({ integrations, requestedIntegrationId }: DiagnosticsPa
           ) : null}
         </section>
       </div>
+      )}
     </>
   )
 }

@@ -185,7 +185,7 @@ function SupportCasesPage({ integrations }: SupportCasesPageProps) {
         />
         {cases.data ? (
           <div className="table-wrap">
-            <table>
+            <table className="integrations-table">
               <thead>
                 <tr>
                   <th>Case</th>
@@ -348,7 +348,9 @@ function SupportCasesPage({ integrations }: SupportCasesPageProps) {
                 <ul className="evidence-list">
                   {selected.evidence.map((item) => (
                     <li key={item.id}>
-                      {item.is_simulated ? <strong>[SIMULATED] </strong> : null}
+                      {item.is_simulated && !item.safe_label.includes('[SIMULATED]') ? (
+                        <strong>[SIMULATED] </strong>
+                      ) : null}
                       {item.safe_label}
                       <span className="muted"> · {item.evidence_type}</span>
                     </li>

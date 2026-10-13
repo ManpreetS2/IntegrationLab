@@ -11,6 +11,18 @@ interface FailuresTableProps {
 }
 
 function context(item: FailureItem): string {
+  if (item.source === 'sdk_telemetry') {
+    return [
+      item.service,
+      item.method,
+      item.endpoint,
+      item.error_category,
+      item.status_code !== null ? `HTTP ${item.status_code}` : null,
+      'SDK-reported',
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  }
   if (item.source === 'webhook_processing') {
     return [item.event_type, item.attempt_count !== null ? `${item.attempt_count} attempt(s)` : null]
       .filter(Boolean)
@@ -43,6 +55,7 @@ function evidenceFor(item: FailureItem): { type: EvidenceType; id: string } | nu
 
 function titleFor(item: FailureItem): string {
   if (item.simulated) return `Simulated failure: ${item.code}`
+  if (item.source === 'sdk_telemetry') return `SDK-reported observation: ${item.code}`
   if (item.source === 'provider_request' && item.status_code === 401) {
     return 'GitHub authentication failure observed'
   }
@@ -132,7 +145,7 @@ function FailuresTable({ items, emptyText }: FailuresTableProps) {
                 <td>
                   <button
                     type="button"
-                    className="secondary-button"
+                    className="secondary-button case-button"
                     disabled={!item.integration_id || busyId === item.id}
                     onClick={() => openCase(item)}
                   >

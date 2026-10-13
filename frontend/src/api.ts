@@ -13,6 +13,9 @@ import type {
   GitHubCheckResult,
   GitHubConnection,
   HealthResponse,
+  IngestionCredentialCreated,
+  IngestionCredentialView,
+  InstrumentedHealth,
   Integration,
   CaseSeverity,
   CaseStatus,
@@ -30,6 +33,8 @@ import type {
   SupportCaseEvidence,
   SupportCaseNote,
   SystemHealth,
+  TelemetryErrorCategory,
+  TelemetryEventPage,
   TimelineItem,
   WebhookEventDetail,
   WebhookEventSummary,
@@ -68,6 +73,25 @@ export function apiOrigin(): string {
 }
 
 /** Non-2xx response from the API. `message` keeps the raw detail text for existing callers. */
+export function explainApiError(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiError)) {
+    return error instanceof Error ? error.message : fallback
+  }
+  const raw = error.message.trim()
+  if (!raw) return fallback
+  try {
+    const body = JSON.parse(raw) as { detail?: unknown }
+    if (typeof body.detail === 'string') return body.detail
+    if (body.detail && typeof body.detail === 'object' && 'message' in body.detail) {
+      const message = (body.detail as { message?: unknown }).message
+      if (typeof message === 'string') return message
+    }
+  } catch {
+    return raw
+  }
+  return raw
+}
+
 export class ApiError extends Error {
   readonly status: number
 
@@ -138,6 +162,63 @@ export function createIntegration(
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export function listIngestionCredentials(integrationId: string): Promise<IngestionCredentialView[]> {
+  return request<IngestionCredentialView[]>(`/api/integrations/${integrationId}/ingestion-credentials`)
+}
+
+export function createIngestionCredential(
+  integrationId: string,
+  label?: string,
+): Promise<IngestionCredentialCreated> {
+  return request<IngestionCredentialCreated>(`/api/integrations/${integrationId}/ingestion-credentials`, {
+    method: 'POST',
+    body: JSON.stringify(label ? { label } : {}),
+  })
+}
+
+export function rotateIngestionCredential(
+  integrationId: string,
+  credentialId: string,
+  label?: string,
+): Promise<IngestionCredentialCreated> {
+  return request<IngestionCredentialCreated>(
+    `/api/integrations/${integrationId}/ingestion-credentials/${credentialId}/rotate`,
+    {
+      method: 'POST',
+      body: JSON.stringify(label ? { label } : {}),
+    },
+  )
+}
+
+export function revokeIngestionCredential(
+  integrationId: string,
+  credentialId: string,
+): Promise<IngestionCredentialView> {
+  return request<IngestionCredentialView>(
+    `/api/integrations/${integrationId}/ingestion-credentials/${credentialId}/revoke`,
+    { method: 'POST' },
+  )
+}
+
+export function listTelemetryEvents(params: {
+  integration_id: string
+  service?: string
+  status_code?: number
+  error_category?: TelemetryErrorCategory | ''
+  occurred_after?: string
+  occurred_before?: string
+  limit?: number
+  cursor?: string
+}): Promise<TelemetryEventPage> {
+  return request<TelemetryEventPage>(`/api/telemetry/v1/events${toQuery(params)}`)
+}
+
+export function getTelemetryHealth(integrationId: string, windowHours = 24): Promise<InstrumentedHealth> {
+  return request<InstrumentedHealth>(
+    `/api/telemetry/v1/integrations/${integrationId}/health${toQuery({ window_hours: windowHours })}`,
+  )
 }
 
 export function githubConnectUrl(integrationId: string): string {

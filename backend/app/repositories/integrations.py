@@ -10,7 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.integration import IntegrationORM
-from app.models.integration import IntegrationCreate, IntegrationStatus, IntegrationUpdate
+from app.models.integration import (
+    IntegrationCreate,
+    IntegrationProvider,
+    IntegrationStatus,
+    IntegrationUpdate,
+)
 
 
 class IntegrationRepository:
@@ -37,11 +42,15 @@ class IntegrationRepository:
         Pass ``commit=False`` when the caller needs to co-commit related rows
         (for example an operator audit event) in the same transaction.
         """
+        if payload.provider == IntegrationProvider.INSTRUMENTED_HTTP:
+            initial_status = IntegrationStatus.REGISTERED.value
+        else:
+            initial_status = IntegrationStatus.NOT_CONNECTED.value
         record = IntegrationORM(
             id=uuid4(),
             name=payload.name,
             provider=payload.provider.value,
-            status=IntegrationStatus.NOT_CONNECTED.value,
+            status=initial_status,
             environment=payload.environment.value,
             owner_team=payload.owner_team,
             criticality=payload.criticality.value if payload.criticality else None,

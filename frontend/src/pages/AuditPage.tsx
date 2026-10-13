@@ -26,14 +26,16 @@ function AuditPage() {
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2>Operator audit</h2>
+        <div>
+          <h2>Operator audit</h2>
+          <p className="muted small-text">
+            Append-only record of meaningful operator actions. Secrets and raw payloads are never stored here.
+          </p>
+        </div>
         <button type="button" className="secondary-button" onClick={events.reload}>
           Refresh
         </button>
       </div>
-      <p className="muted">
-        Append-only record of meaningful operator actions. Secrets and raw payloads are never stored here.
-      </p>
       <div className="filter-row webhook-toolbar">
         <label>
           Action
@@ -57,7 +59,7 @@ function AuditPage() {
       />
       {events.data ? (
         <div className="table-wrap">
-          <table>
+          <table className="integrations-table">
             <thead>
               <tr>
                 <th>Time</th>

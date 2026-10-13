@@ -15,18 +15,29 @@ from app.models.support import Environment
 
 
 class IntegrationStatus(str, Enum):
-    """Lifecycle status for an integration connection."""
+    """Lifecycle status for an integration connection.
+
+    ``registered`` and ``instrumented`` are used only by ``instrumented_http``.
+    They are not OAuth connection states.
+    """
 
     NOT_CONNECTED = "not_connected"
     CONNECTED = "connected"
     NEEDS_SETUP = "needs_setup"
+    REGISTERED = "registered"
+    INSTRUMENTED = "instrumented"
 
 
 class IntegrationProvider(str, Enum):
-    """Currently supported integration providers."""
+    """Supported integration providers.
+
+    ``instrumented_http`` is an application that reports its own outgoing HTTP
+    outcomes. It is not a third-party OAuth or webhook provider.
+    """
 
     GITHUB = "github"
     STRIPE = "stripe"
+    INSTRUMENTED_HTTP = "instrumented_http"
 
 
 class IntegrationCriticality(str, Enum):

@@ -10,6 +10,8 @@ import {
   getOperatorApiKey,
   setOperatorApiKey,
 } from '../auth'
+import AppearanceControl from './AppearanceControl'
+import { AppMark } from './NavIcons'
 
 interface OperatorGateProps {
   children: ReactNode
@@ -90,8 +92,15 @@ function OperatorGate({ children }: OperatorGateProps) {
   return (
     <main className="auth-shell">
       <section className="auth-card" aria-live="polite">
-        <p className="eyebrow">IntegrationLab</p>
-        <h1>Operator console</h1>
+        <AppearanceControl />
+        <div className="auth-brand">
+          <AppMark />
+          <div>
+            <p className="brand-name">IntegrationLab</p>
+            <p className="brand-tag">Operator access</p>
+          </div>
+        </div>
+        <h1 className="page-title">Unlock console</h1>
 
         {state === 'checking' ? (
           <p className="muted">Checking operator access…</p>

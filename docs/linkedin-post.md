@@ -1,4 +1,24 @@
-# LinkedIn post draft — IntegrationLab
+# LinkedIn post draft — IntegrationLab v2
+
+Not published. Waiting for approval after the integrated pull request is merged.
+
+I built IntegrationLab to answer a narrower question than "is the integration up?": what did we actually record, and who reported it?
+
+It is a self-hosted console. GitHub OAuth and Stripe webhooks have their own evidence: signed deliveries, duplicate handling, retries, and a failed queue. Failure Lab can reproduce a failure without changing that provider health. A support case pins the evidence to an investigation.
+
+Universal Monitoring v2 adds a different path. A Python or Node SDK, installed from this repo and not published to a package registry, reports sanitized HTTP outcomes from the application itself. The console shows those rows as SDK-reported. It does not call the upstream service to confirm them. Error rate stays unavailable when nothing was reported, and p95 stays unavailable below 20 observations.
+
+The hard part was keeping those evidence types apart, and not storing the ingestion secret after the one time it is shown.
+
+Backend pytest, frontend tests, both SDK suites, a sample application, and six GitHub Actions jobs cover the current tree. AWS Terraform is validated in CI and has not been applied.
+
+An 86 second recording of the local console is in the repository: docs/media/integrationlab-v2-demo.mp4. The HTTP rows are from the local sample. The Stripe rows are locally signed test-mode events. localhost is not a hosted service.
+
+https://github.com/ManpreetS2/IntegrationLab
+
+---
+
+# Earlier draft — IntegrationLab v1
 
 I built **IntegrationLab**: a support and reliability console for debugging third-party API and webhook integrations.
 

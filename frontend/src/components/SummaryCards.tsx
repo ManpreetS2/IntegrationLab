@@ -12,7 +12,7 @@ function SummaryCards({ integrations }: SummaryCardsProps) {
   ).length
 
   return (
-    <section className="summary-grid" aria-label="Integration summary">
+    <section className="summary-grid totals-grid" aria-label="Integration summary">
       <article className="summary-card">
         <p className="summary-label">Total integrations</p>
         <p className="summary-value">{total}</p>
