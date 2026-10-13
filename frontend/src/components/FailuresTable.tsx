@@ -145,7 +145,7 @@ function FailuresTable({ items, emptyText }: FailuresTableProps) {
                 <td>
                   <button
                     type="button"
-                    className="secondary-button"
+                    className="secondary-button case-button"
                     disabled={!item.integration_id || busyId === item.id}
                     onClick={() => openCase(item)}
                   >

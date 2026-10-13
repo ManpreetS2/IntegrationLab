@@ -1,6 +1,6 @@
 # IntegrationLab v2 demo script
 
-This is a shot list and narration for a 60–90 second screen recording. It is not a claim that a video file is already in the repository.
+The recorded demonstration is [docs/media/integrationlab-v2-demo.mp4](media/integrationlab-v2-demo.mp4). A 15–20 second cut is [docs/media/integrationlab-v2-teaser.mp4](media/integrationlab-v2-teaser.mp4). Both are silent and captioned. The shot list below is the sequence used for that recording.
 
 Record the local console at http://127.0.0.1:8080. Use Frosted Pearl, then one Graphite Glass cut. Do not open the credential dialog while recording. If a prefix is visible, that is public metadata. Do not show the operator key.
 

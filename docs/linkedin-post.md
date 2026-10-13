@@ -12,6 +12,8 @@ The hard part was keeping those evidence types apart, and not storing the ingest
 
 Backend pytest, frontend tests, both SDK suites, a sample application, and six GitHub Actions jobs cover the current tree. AWS Terraform is validated in CI and has not been applied.
 
+An 86 second recording of the local console is in the repository: docs/media/integrationlab-v2-demo.mp4. The HTTP rows are from the local sample. The Stripe rows are locally signed test-mode events. localhost is not a hosted service.
+
 https://github.com/ManpreetS2/IntegrationLab
 
 ---

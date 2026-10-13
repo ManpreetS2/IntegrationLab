@@ -8,6 +8,10 @@ This is a local portfolio application. It is not a hosted monitoring service, an
 
 [![IntegrationLab CI](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml)
 
+[![Watch the IntegrationLab v2 demo](docs/media/integrationlab-v2-thumbnail.png)](docs/media/integrationlab-v2-demo.mp4)
+
+The demonstration is about 86 seconds. It was recorded from a local console, not a public hosted demo. HTTP 200, 429, 500, and timeout rows come from the local sample fixture. Stripe rows in that recording are locally signed test-mode events.
+
 ![Light overview of IntegrationLab](docs/assets/universal-v2/release/light-overview-1600.png)
 
 *Local console, Frosted Pearl light theme. Health comes from stored evidence. Zero counts stay neutral.*
