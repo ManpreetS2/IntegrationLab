@@ -2,19 +2,19 @@
 
 IntegrationLab is a self-hosted console for investigating integration failures with stored evidence.
 
-An operator can connect GitHub and Stripe, run a controlled failure simulation, and read what the system actually recorded. A separate application can also report its own HTTP outcomes through a Python or Node SDK. Those SDK reports are labeled as reports. IntegrationLab does not call the upstream service to confirm them.
+An operator can connect a GitHub OAuth App, receive signed Stripe test-mode webhooks through an endpoint, run a controlled failure simulation, and investigate what the system actually recorded. A separate application can report its own HTTP outcomes through a Python or Node SDK. Those SDK reports are labeled as reports; IntegrationLab does not call the upstream service to confirm them.
 
 This is a local portfolio application. It is not a hosted monitoring service, and the SDK packages are not published to PyPI or npm.
 
 [![IntegrationLab CI](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml)
 
-[![Watch the IntegrationLab v2 demo](docs/media/integrationlab-v2-thumbnail.png)](docs/media/integrationlab-v2-demo.mp4)
+![IntegrationLab Ledger UI v3 — light overview](design/stage2/overview-light-desktop.png)
 
-The demonstration is about 86 seconds. It was recorded from a local console, not a public hosted demo. HTTP 200, 429, 500, and timeout rows come from the local sample fixture. Stripe rows in that recording are locally signed test-mode events.
+*Current local console on `main`: Ledger UI v3, light appearance. Health comes from stored evidence; absent observations are not silently shown as healthy.*
 
-![Light overview of IntegrationLab](docs/assets/universal-v2/release/light-overview-1600.png)
+[![Watch the archived IntegrationLab v2 demo](docs/media/integrationlab-v2-thumbnail.png)](docs/media/integrationlab-v2-demo.mp4)
 
-*Local console, Frosted Pearl light theme. Health comes from stored evidence. Zero counts stay neutral.*
+*Historical v2 video (about 86 seconds), recorded before the Ledger UI v3 redesign. It is not a recording of the current interface.* HTTP 200, 429, 500, and timeout rows come from a local fixture. Stripe events in the video are locally signed test-mode deliveries. There is no public hosted demo.
 
 ## The problem
 
@@ -30,6 +30,22 @@ Logs from the provider, webhook deliveries, and an application's own HTTP client
 - Runs Failure Lab scenarios that are marked simulated and excluded from provider health.
 - Opens a support case with pinned evidence, notes, and an audit trail.
 - Registers an instrumented application, issues an ingestion credential once, and shows the HTTP outcomes that application reported.
+
+## Ledger UI v3
+
+The current interface uses **Ledger**, a restrained, evidence-first design across Overview, Integrations, Requests, Telemetry, Webhooks, Failures, Diagnostics, Support Cases, and Audit. The operator unlock and Failure Lab also use the same visual language. Light is warm paper and ink; dark is warm near-black. Technical identifiers and measurements use a monospaced treatment; status color is reserved for meaningful outcomes.
+
+- **Overview:** read integration health and select records to inspect the evidence behind a state. Stripe's persistent failed queue remains distinct from deliveries in a selected time window.
+- **Telemetry:** inspect SDK-reported observations, filter events, and follow the observation sequence. The interface never presents an SDK report as an independent upstream probe.
+- **Failures and Webhooks:** investigate stored failures, delivery and processing outcomes, bounded retries, and supported actions without merging simulated activity into real metrics.
+- **Support Cases and Audit:** create and update cases, append notes, inspect eligible pinned evidence, and review an append-only operator history. An SDK observation may inform a case summary but is not a pinnable evidence type.
+- **Credentials:** create, rotate, or revoke ingestion credentials. The secret is revealed once; later views display only the credential prefix.
+
+The Ledger redesign uses the existing v2 API contracts and backend health calculations. It does **not** add hosted monitoring, automatic webhook workers, tenant isolation, or upstream verification.
+
+![Ledger v3 — dark telemetry](design/stage2/telemetry-dark-desktop.png)
+
+![Ledger v3 — webhook investigation](design/stage2/webhooks-light-desktop.png)
 
 ## Universal Monitoring v2
 
@@ -48,7 +64,7 @@ The console shows those rows on **Telemetry**, not on the provider request log.
 
 Switching the selected application hides the previous application's credential prefixes and telemetry until the new response arrives.
 
-![SDK-reported telemetry in the light theme](docs/assets/universal-v2/release/light-telemetry-1600.png)
+![SDK-reported telemetry in Ledger v3 light appearance](design/stage2/telemetry-light-desktop.png)
 
 ## GitHub and Stripe
 
@@ -58,17 +74,17 @@ Stripe uses one webhook signing secret for the process. The console shows the lo
 
 Failure Lab, guided diagnostics, GitHub OAuth, and the Stripe webhook receiver are unavailable for instrumented applications. The UI disables those actions instead of pretending they apply.
 
-![Stripe webhook investigation](docs/assets/universal-v2/release/stripe-webhooks-1600.png)
+![Stripe webhook investigation in Ledger v3](design/stage2/webhooks-dark-desktop.png)
 
 ## Light and dark
 
-The same screens use Frosted Pearl in light mode and Graphite Glass in dark mode. System follows the operating system, including a later change. The choice is stored in this browser.
+Ledger UI v3 has warm paper-and-ink light and warm near-black dark appearances. Choose **System**, **Light**, or **Dark** in the console. System follows the operating system, including later changes. The choice is stored in this browser.
 
-![Dark overview](docs/assets/universal-v2/release/dark-overview-1600.png)
+![Ledger v3 — dark overview](design/stage2/overview-dark-desktop.png)
 
-![Telemetry on a phone, light](docs/assets/universal-v2/release/light-telemetry-mobile.png)
+![Ledger v3 — telemetry on a phone, light](design/stage2/telemetry-light-mobile.png)
 
-![Telemetry on a phone, dark](docs/assets/universal-v2/release/dark-telemetry-mobile.png)
+![Ledger v3 — telemetry on a phone, dark](design/stage2/telemetry-dark-mobile.png)
 
 ## Architecture
 
@@ -182,7 +198,7 @@ Use the same environment variables as the Python SDK. `fromEnv()` rejects an ope
 3. On Integrations, create an Instrumented HTTP application. Status becomes Registered.
 4. Generate an ingestion credential. Copy it from the dialog. Close the dialog. The list shows the prefix only.
 5. Point the Python sample at that integration and run it.
-6. Open Telemetry. The banner says the rows are SDK-reported. Expect degraded health for the fixture: successes, a 429, a 500, and a timeout. p95 stays unavailable.
+6. Open Telemetry. The page identifies rows as SDK-reported. Expect degraded health for the fixture: successes, a 429, a 500, and a timeout. p95 stays unavailable.
 7. Open Failures and filter to SDK-reported. The source is `sdk_telemetry`.
 8. Rotate the credential. The previous secret is rejected. Revoke the replacement. Status returns to Registered. The historical rows remain.
 9. Open Requests, Webhooks, Diagnostics, and Support Cases for the GitHub and Stripe records. Those pages are the provider workflows, not the SDK feed.
@@ -205,7 +221,9 @@ Pytest and the acceptance script use a database whose name ends in `_test`. They
 
 GitHub Actions runs six jobs: backend tests, frontend quality, backend image, frontend image, Compose smoke, and Terraform validate. The smoke job builds its own stack and deletes that stack's volume when it finishes.
 
-The claim-to-evidence notes for the earlier GitHub OAuth and Stripe CLI sessions are in [docs/verification.md](docs/verification.md). Those sessions were local. They are not a public production deployment.
+For Ledger UI v3, isolated browser/API checks covered one-time credential reveal, rotation and revocation, webhook retry and dismiss, support-case creation, notes and status changes, unauthorized operator actions, and narrow-screen presentation. **GitHub OAuth was not completed in that UI v3 browser review** because the isolated environment lacked GitHub App configuration. Passing CI does not substitute for testing a real external OAuth handshake.
+
+The claim-to-evidence notes for earlier GitHub OAuth and Stripe CLI sessions are in [docs/verification.md](docs/verification.md). Those sessions were local. They are not a public production deployment.
 
 ## Security boundaries
 
