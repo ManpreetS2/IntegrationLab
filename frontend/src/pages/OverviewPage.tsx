@@ -10,6 +10,7 @@ import { pageHref, useResource } from '../hooks'
 import { draftFromIntegration, type CaseDraft } from '../ledger/case'
 import {
   attentionHeadline,
+  emptyWindowSequence,
   latestActivity,
   matchesOverviewFilter,
   shorten,
@@ -173,6 +174,7 @@ function OverviewPage() {
                 {shown ? (
                   <ObservationSequence
                     marks={marks}
+                    emptyText={emptyWindowSequence(selected)}
                     onSelect={(id) => {
                       setMarkId(id)
                     }}

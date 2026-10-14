@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { InstrumentedHealth } from '../types'
-import { attentionHeadline, telemetryFinding } from './copy.ts'
+import type { IntegrationHealth, WebhookMetrics } from '../types'
+import { attentionHeadline, emptyWindowSequence, telemetryFinding, windowTally } from './copy.ts'
 
 test('two degraded integrations use the approved headline', () => {
   assert.equal(attentionHeadline(0, 2, 3), 'Two integrations need attention.')
@@ -62,4 +63,60 @@ test('telemetry finding follows the latest report without hiding a degraded wind
     'No observations in this window.',
   )
   assert.equal(telemetryFinding(health({ health: 'not_configured', metrics: { request_count: 0 } })), 'This application is not configured.')
+})
+
+function stripeHealth(failed: number, eventsInWindow: number): IntegrationHealth {
+  const webhooks: WebhookMetrics = {
+    verification_configured: true,
+    events_total: failed + eventsInWindow,
+    events_in_window: eventsInWindow,
+    duplicate_deliveries: 2,
+    pending: 0,
+    stale_pending: 0,
+    processing: 0,
+    stale_processing: 0,
+    retry_scheduled: 0,
+    failed,
+    processed: 0,
+    ignored: 0,
+    dismissed: 0,
+    failed_attempts_in_window: 0,
+    successful_attempts_in_window: 0,
+    retries_scheduled_in_window: 0,
+    last_received_at: '2026-10-10T17:57:01Z',
+  }
+  return {
+    integration_id: 'stripe',
+    name: 'Stripe Billing Sandbox',
+    provider: 'stripe',
+    connection_status: 'not_connected',
+    configuration: 'ready',
+    health: 'degraded',
+    summary: 'Webhook processing needs attention.',
+    evidence: [],
+    recommended_action: null,
+    last_activity_at: '2026-10-10T17:57:01Z',
+    last_checked_at: null,
+    request_metrics: null,
+    telemetry_metrics: null,
+    latest_diagnostic: null,
+    webhook_metrics: webhooks,
+  }
+}
+
+test('an empty Stripe window names the persistent failed queue without calling it a recent delivery', () => {
+  const text = emptyWindowSequence(stripeHealth(2, 0))
+  assert.equal(
+    text,
+    'No deliveries in this window. The failed queue still holds 2 events from earlier. They are not recent deliveries.',
+  )
+  assert.equal(
+    emptyWindowSequence(stripeHealth(1, 0)),
+    'No deliveries in this window. The failed queue still holds 1 event from earlier. They are not recent deliveries.',
+  )
+  assert.equal(emptyWindowSequence(stripeHealth(0, 0)), 'No observations in this window.')
+  assert.equal(emptyWindowSequence(null), 'No observations in this window.')
+  assert.equal(windowTally(stripeHealth(2, 0)), 'No deliveries')
+  assert.equal(windowTally(stripeHealth(2, 3)), '2 failed · 2 duplicates')
+  assert.doesNotMatch(text, /delivered in this window|recent deliveries were|2 failed/)
 })

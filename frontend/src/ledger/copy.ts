@@ -48,6 +48,19 @@ export function shorten(text: string, max = 160): string {
   return `${clean.slice(0, max - 1).trimEnd()}…`
 }
 
+/**
+ * Empty observation sequence. A Stripe failed queue is persistent and is not
+ * the same thing as a delivery inside the selected window.
+ */
+export function emptyWindowSequence(item: IntegrationHealth | null): string {
+  const webhooks = item?.provider === 'stripe' ? item.webhook_metrics : null
+  if (webhooks && webhooks.events_in_window === 0 && webhooks.failed > 0) {
+    const noun = webhooks.failed === 1 ? 'event' : 'events'
+    return `No deliveries in this window. The failed queue still holds ${webhooks.failed} ${noun} from earlier. They are not recent deliveries.`
+  }
+  return 'No observations in this window.'
+}
+
 export function windowTally(item: IntegrationHealth): string {
   const telemetry = item.telemetry_metrics
   if (telemetry) {
@@ -56,7 +69,7 @@ export function windowTally(item: IntegrationHealth): string {
   }
   const webhooks = item.webhook_metrics
   if (webhooks) {
-    if (webhooks.events_in_window === 0 && webhooks.failed === 0) return 'No events'
+    if (webhooks.events_in_window === 0) return webhooks.failed > 0 ? 'No deliveries' : 'No events'
     return `${webhooks.failed} failed · ${webhooks.duplicate_deliveries} duplicates`
   }
   const requests = item.request_metrics

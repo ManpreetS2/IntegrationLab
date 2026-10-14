@@ -757,7 +757,10 @@ html[data-theme='dark'] .lg-drawer-backdrop {
 
   .app-frame.ledger .lg-mobile-nav a {
     flex: 0 0 auto;
-    padding: 6px 10px;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
     border-radius: 4px;
     color: var(--lg-muted);
     font-size: 0.82rem;
@@ -779,13 +782,28 @@ html[data-theme='dark'] .lg-drawer-backdrop {
 
   .app-frame.ledger .app-topbar {
     justify-content: flex-start;
-    gap: 8px;
-    padding: 8px 12px;
+    align-items: center;
+    gap: 0;
+    padding: 0 8px;
   }
 
   .app-frame.ledger .topbar-meta {
-    width: auto;
-    margin-left: auto;
+    flex: 1 1 100%;
+    width: 100%;
+    margin: 0;
+    justify-content: flex-start;
+    gap: 8px;
+    min-height: 44px;
+  }
+
+  .app-frame.ledger .appearance-option {
+    min-height: 44px;
+    padding: 0 10px;
+  }
+
+  .app-frame.ledger .status-chip {
+    min-height: 32px;
+    padding: 0 8px;
   }
 
   .app-frame.ledger .lg-filters {

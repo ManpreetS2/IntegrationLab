@@ -5,9 +5,11 @@ import { useScrollEdges } from './useScrollEdges'
 function ObservationSequence({
   marks,
   onSelect,
+  emptyText = 'No observations in this window.',
 }: {
   marks: SequenceMark[]
   onSelect?: (id: string) => void
+  emptyText?: string
 }) {
   const [node, setNode] = useState<HTMLDivElement | null>(null)
   const edges = useScrollEdges(node, marks.length)
@@ -16,7 +18,7 @@ function ObservationSequence({
   const behavior = reduceMotion ? 'auto' : 'smooth'
 
   if (marks.length === 0) {
-    return <p className="lg-empty">No observations in this window.</p>
+    return <p className="lg-empty">{emptyText}</p>
   }
 
   function scrollBy(distance: number) {
