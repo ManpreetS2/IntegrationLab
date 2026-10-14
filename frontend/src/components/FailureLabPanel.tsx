@@ -95,28 +95,15 @@ function FailureLabPanel({ integrations, onCompleted }: FailureLabPanelProps) {
   const selectedScenario = scenarios.find((item) => item.id === scenario)
 
   if (githubIntegrations.length === 0) {
-    return (
-      <div className="failure-lab">
-        <p className="muted">Create a GitHub integration to use Failure Lab.</p>
-      </div>
-    )
+    return <p className="lg-empty">Create a GitHub integration to use Failure Lab.</p>
   }
 
   return (
-    <div className="failure-lab">
-      <p className="muted">
-        Reproduce common provider integration failures in a controlled environment without damaging
-        the real connection.
-      </p>
-
-      <div className="failure-lab-controls">
-        <label>
+    <div>
+      <div className="lg-form-row">
+        <label className="lg-field">
           Integration
-          <select
-            value={integrationId}
-            onChange={(event) => setIntegrationId(event.target.value)}
-            disabled={running}
-          >
+          <select value={integrationId} onChange={(event) => setIntegrationId(event.target.value)} disabled={running}>
             {githubIntegrations.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
@@ -124,8 +111,7 @@ function FailureLabPanel({ integrations, onCompleted }: FailureLabPanelProps) {
             ))}
           </select>
         </label>
-
-        <label>
+        <label className="lg-field">
           Scenario
           <select
             value={scenario}
@@ -139,115 +125,88 @@ function FailureLabPanel({ integrations, onCompleted }: FailureLabPanelProps) {
             ))}
           </select>
         </label>
-
-        <button type="button" onClick={() => void handleRun()} disabled={running || !scenario}>
-          {running ? 'Running simulation…' : 'Run Simulation'}
+        <button type="button" className="lg-case-button" onClick={() => void handleRun()} disabled={running || !scenario}>
+          {running ? 'Running simulation…' : 'Run simulation'}
         </button>
       </div>
-
-      {selectedScenario ? <p className="muted scenario-hint">{selectedScenario.description}</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
-
+      {selectedScenario ? <p className="lg-note">{selectedScenario.description}</p> : null}
+      {error ? (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      ) : null}
       {result ? (
-        <div className="failure-result">
-          <div className="failure-observed">
-            <h3>Observed</h3>
-            <dl className="result-grid">
-              <div>
-                <dt>Scenario</dt>
-                <dd>{result.scenario}</dd>
-              </div>
-              <div>
-                <dt>Request</dt>
-                <dd>
-                  {result.request.method} {result.request.endpoint}
-                </dd>
-              </div>
-              <div>
-                <dt>HTTP status</dt>
-                <dd>{result.observed.status_code ?? 'null (no response)'}</dd>
-              </div>
-              <div>
-                <dt>Latency</dt>
-                <dd>{result.observed.latency_ms}ms (simulated)</dd>
-              </div>
-              <div>
-                <dt>Error classification</dt>
-                <dd>{result.observed.error_code ?? '—'}</dd>
-              </div>
-              <div>
-                <dt>Rate limit remaining</dt>
-                <dd>{result.observed.rate_limit_remaining ?? '—'}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="failure-diagnosis">
-            <h3>Diagnosis</h3>
-            <p className="diagnosis-title">{result.diagnosis.title}</p>
-            <p>{result.diagnosis.summary}</p>
-            <p>
-              <strong>Retryable later:</strong> {result.diagnosis.retryable ? 'Yes' : 'No'}
-            </p>
+        <>
+          <p className="lg-section-label">Observed · simulated</p>
+          <dl className="lg-rules">
             <div>
-              <h4>Evidence</h4>
-              <ul>
-                {result.diagnosis.evidence.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
+              <dt>Scenario</dt>
+              <dd>{result.scenario}</dd>
             </div>
             <div>
-              <h4>Recommended checks</h4>
-              <ul>
-                {result.diagnosis.recommended_checks.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
+              <dt>Request</dt>
+              <dd className="lg-mono">
+                {result.request.method} {result.request.endpoint}
+              </dd>
             </div>
-          </div>
+            <div>
+              <dt>HTTP status</dt>
+              <dd>{result.observed.status_code ?? 'No response'}</dd>
+            </div>
+            <div>
+              <dt>Latency</dt>
+              <dd>{result.observed.latency_ms} ms · simulated</dd>
+            </div>
+            <div>
+              <dt>Classification</dt>
+              <dd>{result.observed.error_code ?? '—'}</dd>
+            </div>
+          </dl>
+          <p className="lg-section-label">Diagnosis</p>
+          <p className="lg-note">
+            <strong>{result.diagnosis.title}</strong> · {result.diagnosis.summary} Retryable later:{' '}
+            {result.diagnosis.retryable ? 'yes' : 'no'}.
+          </p>
+          <ul className="lg-links">
+            {result.diagnosis.evidence.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+            {result.diagnosis.recommended_checks.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      <p className="lg-section-label">Recent simulations</p>
+      {history.length === 0 ? <p className="lg-empty">No simulations yet.</p> : null}
+      {history.length > 0 ? (
+        <div className="lg-scroll-table">
+          <table className="lg-table">
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Scenario</th>
+                <th scope="col">Status</th>
+                <th scope="col">Diagnosis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((row) => (
+                <tr key={row.id} className={result?.id === row.id ? 'is-selected' : undefined}>
+                  <td>
+                    <button type="button" className="secondary-button" onClick={() => void handleSelectRun(row.id)}>
+                      {new Date(row.created_at).toLocaleString()}
+                    </button>
+                  </td>
+                  <td>{row.scenario}</td>
+                  <td>{row.status_code ?? '—'}</td>
+                  <td>{row.diagnosis_title}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : null}
-
-      <div className="failure-history">
-        <h3>Recent Failure Lab runs</h3>
-        {history.length === 0 ? (
-          <p className="empty-state">No simulations yet.</p>
-        ) : (
-          <div className="table-wrap">
-            <table className="integrations-table">
-              <thead>
-                <tr>
-                  <th scope="col">Time</th>
-                  <th scope="col">Scenario</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Diagnosis</th>
-                  <th scope="col">Retryable</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      <button
-                        type="button"
-                        className="linkish-button"
-                        onClick={() => void handleSelectRun(row.id)}
-                      >
-                        {new Date(row.created_at).toLocaleString()}
-                      </button>
-                    </td>
-                    <td>{row.scenario}</td>
-                    <td>{row.status_code ?? '—'}</td>
-                    <td>{row.diagnosis_title}</td>
-                    <td>{row.retryable ? 'Yes' : 'No'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   )
 }

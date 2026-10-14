@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { InstrumentedHealth } from '../types'
 import type { IntegrationHealth, WebhookMetrics } from '../types'
-import { attentionHeadline, emptyWindowSequence, telemetryFinding, windowTally } from './copy.ts'
+import { attentionHeadline, emptyWindowSequence, telemetryFinding, webhookFinding, windowTally } from './copy.ts'
 
 test('two degraded integrations use the approved headline', () => {
   assert.equal(attentionHeadline(0, 2, 3), 'Two integrations need attention.')
@@ -119,4 +119,12 @@ test('an empty Stripe window names the persistent failed queue without calling i
   assert.equal(windowTally(stripeHealth(2, 0)), 'No deliveries')
   assert.equal(windowTally(stripeHealth(2, 3)), '2 failed · 2 duplicates')
   assert.doesNotMatch(text, /delivered in this window|recent deliveries were|2 failed/)
+})
+
+test('webhook headlines keep the failed queue ahead of pending work', () => {
+  const base = { failed: 0, retry_scheduled: 0, pending: 0, processing: 0, received: 2 }
+  assert.equal(webhookFinding({ ...base, failed: 2 }), '2 events are in the failed queue.')
+  assert.equal(webhookFinding({ ...base, pending: 2 }), '2 deliveries are waiting to be processed.')
+  assert.equal(webhookFinding({ ...base, retry_scheduled: 1, pending: 2 }), 'Events are waiting to retry.')
+  assert.equal(webhookFinding(base), 'Verified deliveries are being processed.')
 })

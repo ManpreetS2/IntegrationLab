@@ -1,61 +1,26 @@
 import { useCallback, useState } from 'react'
 import { getDiagnosticRun, getIntegrationReliability, listDiagnosticRuns, runDiagnostics } from '../api'
+import EvidenceTrail from '../components/ledger/EvidenceTrail'
+import LedgerList, { HealthWord } from '../components/ledger/LedgerList'
 import SectionStatus from '../components/SectionStatus'
-import { CheckBadge, HealthBadge } from '../components/StatusBadges'
-import { formatMs, formatTime } from '../format'
+import { checkLabel, formatMs, formatProvider, formatTime } from '../format'
 import { errorMessage, navigate, pageHref, useResource } from '../hooks'
-import type { DiagnosticRun, Integration } from '../types'
+import { shorten } from '../ledger/copy'
+import type { DiagnosticCheck, DiagnosticRun, Integration } from '../types'
 
 interface DiagnosticsPageProps {
   integrations: Integration[]
   requestedIntegrationId: string | null
 }
 
-function ChecksTable({ run }: { run: DiagnosticRun }) {
-  return (
-    <div className="table-wrap">
-      <table className="integrations-table checks-table">
-        <thead>
-          <tr>
-            <th scope="col">Status</th>
-            <th scope="col">Check</th>
-            <th scope="col">Evidence</th>
-            <th scope="col">Recommendation</th>
-            <th scope="col">Latency</th>
-          </tr>
-        </thead>
-        <tbody>
-          {run.checks.map((check) => (
-            <tr key={check.check_code}>
-              <td>
-                <CheckBadge status={check.status} />
-              </td>
-              <td>
-                <strong>{check.title}</strong>
-                {check.required ? <span className="required-tag">Required</span> : null}
-                <div className="muted small-text">
-                  <code>{check.check_code}</code>
-                </div>
-              </td>
-              <td>{check.evidence}</td>
-              <td>{check.recommendation ?? '—'}</td>
-              <td className="nowrap">{formatMs(check.latency_ms)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 function DiagnosticsPage({ integrations, requestedIntegrationId }: DiagnosticsPageProps) {
   const integrationId =
     integrations.find((item) => item.id === requestedIntegrationId)?.id ?? integrations[0]?.id ?? null
   const integration = integrations.find((item) => item.id === integrationId) ?? null
-
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [chosen, setChosen] = useState<{ integrationId: string; runId: string } | null>(null)
+  const [pickedCheck, setPickedCheck] = useState<string | null>(null)
 
   const loadHealth = useCallback(
     () => (integrationId ? getIntegrationReliability(integrationId) : Promise.reject(new Error('No integration'))),
@@ -67,7 +32,6 @@ function DiagnosticsPage({ integrations, requestedIntegrationId }: DiagnosticsPa
   )
   const health = useResource(integrationId ? loadHealth : null)
   const runs = useResource(integrationId ? loadRuns : null)
-
   const selectedRunId =
     (chosen && chosen.integrationId === integrationId ? chosen.runId : null) ?? runs.data?.[0]?.id ?? null
   const loadRun = useCallback(
@@ -83,6 +47,7 @@ function DiagnosticsPage({ integrations, requestedIntegrationId }: DiagnosticsPa
     try {
       const result = await runDiagnostics(integrationId)
       setChosen({ integrationId, runId: result.id })
+      setPickedCheck(null)
       runs.reload()
       health.reload()
     } catch (err) {
@@ -94,153 +59,170 @@ function DiagnosticsPage({ integrations, requestedIntegrationId }: DiagnosticsPa
 
   if (integrations.length === 0) {
     return (
-      <section className="panel">
-        <h2>Diagnostics</h2>
-        <p className="empty-state">Create an integration first.</p>
-      </section>
+      <div className="lg-page">
+        <div className="lg-main">
+          <p className="lg-kicker">Diagnostics</p>
+          <h1 className="lg-finding">Create an integration first.</h1>
+        </div>
+        <EvidenceTrail title="Diagnostics" stations={[{ label: 'Scope', text: 'Checks run against one stored integration.' }]} />
+      </div>
     )
   }
 
-  const current = health.data
+  const current = health.data && health.data.integration_id === integrationId ? health.data : null
   const displayedRun = run.data && run.data.id === selectedRunId ? run.data : null
   const instrumented = integration?.provider === 'instrumented_http'
+  const checks = displayedRun?.checks ?? []
+  const selectedCheck = checks.find((item) => item.check_code === pickedCheck) ?? checks[0] ?? null
+  const finding = instrumented
+    ? 'Diagnostics do not apply here.'
+    : current
+      ? shorten(current.summary, 88)
+      : 'Run diagnostics.'
 
   return (
-    <>
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Guided diagnostics</h2>
-        </div>
-        <p className="muted">
-          Runs a fixed, deterministic checklist on demand. GitHub diagnostics make one real{' '}
-          <code>GET /user</code> call (logged as a real request). Stripe diagnostics only inspect stored
-          webhook evidence. Diagnostics never change connection status, credentials, or events.
-        </p>
-        <div className="webhook-toolbar">
-          <label>
-            Integration
-            <select
-              value={integrationId ?? ''}
-              onChange={(e) => navigate('diagnostics', { integration: e.target.value })}
-              disabled={running}
-            >
-              {integrations.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} ({item.provider})
-                </option>
-              ))}
-            </select>
-          </label>
+    <div className={running ? 'lg-busy' : undefined} aria-busy={running || undefined}>
+      <div className="lg-page">
+        <div className="lg-main">
+          <p className="lg-kicker">Diagnostics · on demand</p>
+          <h1 className="lg-finding">{finding}</h1>
+          <p className="lg-note">
+            A fixed checklist. GitHub makes one real GET /user, logged as a real request. Stripe inspects stored webhook
+            evidence. Checks never change connection status, credentials, or events.
+          </p>
+          <div className="lg-form-row">
+            <label className="lg-field">
+              Integration
+              <select
+                value={integrationId ?? ''}
+                onChange={(event) => navigate('diagnostics', { integration: event.target.value })}
+                disabled={running}
+              >
+                {integrations.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · {formatProvider(item.provider)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {instrumented ? (
+              <button type="button" disabled>
+                Diagnostics unavailable
+              </button>
+            ) : (
+              <button type="button" className="lg-case-button" onClick={() => void handleRun()} disabled={running || !integrationId}>
+                {running ? 'Running diagnostics…' : 'Run diagnostics'}
+              </button>
+            )}
+          </div>
           {instrumented ? (
-            <button type="button" disabled>
-              Diagnostics unavailable
-            </button>
-          ) : (
-            <button type="button" onClick={() => void handleRun()} disabled={running || !integrationId}>
-              {running ? 'Running diagnostics…' : 'Run diagnostics'}
-            </button>
+            <p className="lg-note">
+              Instrumented applications do not support guided diagnostics, GitHub OAuth, Stripe webhooks, or Failure Lab.
+              Health comes from stored SDK observations on{' '}
+              <a href={pageHref('telemetry', { integration: integration.id })}>Telemetry</a>.
+            </p>
+          ) : null}
+          {runError ? (
+            <p className="error-text" role="alert">
+              {runError}
+            </p>
+          ) : null}
+          <p className="lg-section-label">Current health</p>
+          <SectionStatus loading={health.loading} error={health.error} hasData={Boolean(current)} onRetry={health.reload} />
+          {current ? (
+            <>
+              <p className="lg-status">
+                <HealthWord state={current.health} />
+              </p>
+              <p className="lg-note">{current.summary}</p>
+              {current.recommended_action ? <p className="lg-note">Next step: {current.recommended_action}</p> : null}
+            </>
+          ) : null}
+          {instrumented ? null : (
+            <>
+              <p className="lg-section-label">Previous runs</p>
+              <SectionStatus loading={runs.loading} error={runs.error} hasData={Boolean(runs.data)} onRetry={runs.reload} />
+              <LedgerList
+                label="Diagnostic runs"
+                columns={['When', 'Status', 'Passed', 'Failed']}
+                rows={(runs.data ?? []).map((item) => ({
+                  id: item.id,
+                  title: checkLabel(item.overall_status),
+                  meta: formatTime(item.started_at),
+                  detail: `${item.check_counts.passed} pass · ${item.check_counts.failed} fail`,
+                  cells: [
+                    formatTime(item.started_at),
+                    checkLabel(item.overall_status),
+                    String(item.check_counts.passed),
+                    String(item.check_counts.failed),
+                  ],
+                }))}
+                selectedId={selectedRunId}
+                onSelect={(id) => {
+                  if (integrationId) setChosen({ integrationId, runId: id })
+                  setPickedCheck(null)
+                }}
+                emptyText="No diagnostic runs yet for this integration."
+              />
+              <p className="lg-section-label">Checks</p>
+              <SectionStatus
+                loading={run.loading}
+                error={run.error}
+                hasData={Boolean(displayedRun)}
+                onRetry={run.reload}
+                loadingText="Loading run…"
+              />
+              {displayedRun ? <p className="lg-note">{displayedRun.summary}</p> : null}
+              <LedgerList
+                label="Checks"
+                columns={['Status', 'Check', 'Evidence', 'Latency']}
+                rows={checks.map((check) => ({
+                  id: check.check_code,
+                  title: check.title,
+                  meta: checkLabel(check.status),
+                  detail: shorten(check.evidence, 90),
+                  cells: [
+                    checkLabel(check.status),
+                    <span key="title">
+                      <strong>{check.title}</strong>
+                      {check.required ? <span className="lg-muted"> · required</span> : null}
+                    </span>,
+                    shorten(check.evidence, 80),
+                    formatMs(check.latency_ms),
+                  ],
+                }))}
+                selectedId={selectedCheck?.check_code ?? null}
+                onSelect={setPickedCheck}
+                emptyText={selectedRunId ? 'This run has no checks.' : 'Run diagnostics to see check results.'}
+              />
+            </>
           )}
         </div>
-        {instrumented ? (
-          <p className="muted">
-            Instrumented applications do not support guided diagnostics, GitHub OAuth, Stripe webhooks, or
-            Failure Lab. Health comes from stored SDK observations on{' '}
-            <a href={pageHref('telemetry', { integration: integration.id })}>Telemetry</a>.
-          </p>
-        ) : null}
-        {runError ? (
-          <p className="error-text" role="alert">
-            {runError}
-          </p>
-        ) : null}
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Current health</h2>
-          {current ? <HealthBadge state={current.health} /> : null}
-        </div>
-        <SectionStatus loading={health.loading} error={health.error} hasData={Boolean(current)} onRetry={health.reload} />
-        {current && current.integration_id === integrationId ? (
-          <>
-            <p className="health-summary">{current.summary}</p>
-            {current.evidence.length > 0 ? (
-              <ul className="evidence-list">
-                {current.evidence.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            ) : null}
-            {current.recommended_action ? (
-              <p className="recommendation">
-                <strong>Next step:</strong> {current.recommended_action}
-              </p>
-            ) : null}
-            <p className="muted small-text">
-              {integration?.provider === 'github' ? `Connection: ${current.configuration}` : current.configuration}
-            </p>
-          </>
-        ) : null}
-      </section>
-
-      {instrumented ? null : (
-      <div className="diagnostics-layout">
-        <section className="panel">
-          <h2>Previous runs</h2>
-          <SectionStatus loading={runs.loading} error={runs.error} hasData={Boolean(runs.data)} onRetry={runs.reload} />
-          {runs.data && runs.data.length === 0 ? (
-            <p className="empty-state">No diagnostic runs yet for this integration.</p>
-          ) : null}
-          <ul className="run-list">
-            {(runs.data ?? []).map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className={item.id === selectedRunId ? 'run-item run-item-active' : 'run-item'}
-                  onClick={() => integrationId && setChosen({ integrationId, runId: item.id })}
-                >
-                  <span className="run-item-top">
-                    <CheckBadge status={item.overall_status} />
-                    <span className="small-text">{formatTime(item.started_at)}</span>
-                  </span>
-                  <span className="muted small-text">
-                    {item.check_counts.passed} pass · {item.check_counts.warning} warn · {item.check_counts.failed}{' '}
-                    fail · {item.check_counts.unknown} unknown
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="panel">
-          <h2>Checks</h2>
-          <SectionStatus
-            loading={run.loading}
-            error={run.error}
-            hasData={Boolean(displayedRun)}
-            onRetry={run.reload}
-            loadingText="Loading run…"
-          />
-          {displayedRun ? (
-            <>
-              <div className="run-summary">
-                <CheckBadge status={displayedRun.overall_status} />
-                <span>{displayedRun.summary}</span>
-              </div>
-              <p className="muted small-text">
-                Started {formatTime(displayedRun.started_at)} · completed {formatTime(displayedRun.completed_at)}
-              </p>
-              <ChecksTable run={displayedRun} />
-            </>
-          ) : !run.loading && !selectedRunId ? (
-            <p className="empty-state">Run diagnostics to see check results.</p>
-          ) : null}
-        </section>
+        <EvidenceTrail
+          title={selectedCheck?.title ?? integration?.name ?? 'Diagnostics'}
+          stations={checkStations(selectedCheck, displayedRun)}
+        />
       </div>
-      )}
-    </>
+    </div>
   )
+}
+
+function checkStations(check: DiagnosticCheck | null, run: DiagnosticRun | null) {
+  if (!check) {
+    return [
+      {
+        label: 'Run',
+        text: run?.summary ?? 'Select a run. Each check shows the evidence the diagnostic stored.',
+      },
+    ]
+  }
+  return [
+    { label: 'Status', text: `${checkLabel(check.status)}${check.required ? ' · required' : ''}` },
+    { label: 'Code', text: check.check_code },
+    { label: 'Evidence', text: shorten(check.evidence, 180) },
+    { label: 'Next', text: shorten(check.recommendation ?? 'No recommendation stored.', 160) },
+    { label: 'Latency', text: formatMs(check.latency_ms) },
+  ]
 }
 
 export default DiagnosticsPage

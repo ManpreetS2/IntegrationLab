@@ -61,6 +61,35 @@ export function emptyWindowSequence(item: IntegrationHealth | null): string {
   return 'No observations in this window.'
 }
 
+export function webhookFinding(
+  summary: { failed: number; retry_scheduled: number; pending: number; processing: number; received: number } | null,
+): string {
+  if (!summary) return 'Webhooks'
+  if (summary.failed === 1) return 'One event is in the failed queue.'
+  if (summary.failed > 1) return `${summary.failed} events are in the failed queue.`
+  if (summary.retry_scheduled > 0) return 'Events are waiting to retry.'
+  if (summary.pending === 1) return 'One delivery is waiting to be processed.'
+  if (summary.pending > 1) return `${summary.pending} deliveries are waiting to be processed.`
+  if (summary.processing > 0) return 'Deliveries are being processed.'
+  if (summary.received === 0) return 'No verified deliveries yet.'
+  return 'Verified deliveries are being processed.'
+}
+
+export function integrationFinding(items: { provider: string; status: string }[]): string {
+  if (items.length === 0) return 'No integrations yet.'
+  const githubPending = items.filter(
+    (item) => item.provider === 'github' && (item.status === 'not_connected' || item.status === 'needs_setup'),
+  ).length
+  const appsPending = items.filter(
+    (item) => item.provider === 'instrumented_http' && item.status === 'registered',
+  ).length
+  const pending = githubPending + appsPending
+  if (pending === 0) return 'Connections and credentials are in place.'
+  if (pending === 1 && githubPending === 1) return 'One GitHub integration is not connected.'
+  if (pending === 1 && appsPending === 1) return 'One application still needs an ingestion credential.'
+  return `${countWord(pending)} integrations still need a connection or credential.`
+}
+
 export function windowTally(item: IntegrationHealth): string {
   const telemetry = item.telemetry_metrics
   if (telemetry) {

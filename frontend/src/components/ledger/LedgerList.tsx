@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { HEALTH_LABELS } from '../../format'
 import { healthTone } from '../../ledger/copy'
+import { focusableOptionInList } from '../../ledger/focus'
 import type { HealthState } from '../../types'
 import { useScrollEdges } from './useScrollEdges'
 
@@ -23,10 +24,15 @@ export interface LedgerRow {
   detail?: ReactNode
 }
 
-function focusOption(id: string) {
+function focusOption(list: ParentNode | null, id: string) {
   window.setTimeout(() => {
-    const matches = Array.from(document.querySelectorAll<HTMLElement>('[data-lg-option]'))
-    matches.find((element) => element.dataset.lgId === id && element.getClientRects().length > 0)?.focus()
+    if (!list) return
+    const options = Array.from(list.querySelectorAll<HTMLElement>('[data-lg-option]')).map((element) => ({
+      id: element.dataset.lgId ?? '',
+      visible: element.getClientRects().length > 0,
+      element,
+    }))
+    focusableOptionInList(options, id)?.element.focus()
   }, 0)
 }
 
@@ -52,7 +58,7 @@ function onOptionKey(
   const id = next?.dataset.lgId
   if (!id) return
   onSelect(id)
-  focusOption(id)
+  focusOption(group, id)
 }
 
 function LedgerList({

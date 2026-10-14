@@ -104,15 +104,7 @@ function App() {
           requestedIntegrationId={route.params.get('integration')}
         />
       ) : null}
-      {route.page === 'webhooks' ? (
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Stripe Webhooks</h2>
-            <span className="muted small-text">Operator-triggered processing · test mode</span>
-          </div>
-          <StripeWebhooksPanel integrations={items} />
-        </section>
-      ) : null}
+      {route.page === 'webhooks' ? <StripeWebhooksPanel integrations={items} /> : null}
       {route.page === 'failures' ? (
         <FailuresPage integrations={items} onIntegrationsChanged={reloadIntegrations} />
       ) : null}

@@ -76,8 +76,8 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
 
   if (integration.status === 'not_connected') {
     return (
-      <div className="github-panel">
-        <p className="muted">Not connected to GitHub yet.</p>
+      <div>
+        <p className="lg-note">Not connected to GitHub yet. Tokens never reach the browser.</p>
         <a className="button-link" href={githubConnectUrl(integration.id)}>
           Connect GitHub
         </a>
@@ -87,8 +87,8 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
 
   if (integration.status === 'needs_setup') {
     return (
-      <div className="github-panel">
-        <p className="error-text">Needs setup — GitHub authorization is missing or revoked.</p>
+      <div>
+        <p className="error-text">Needs setup. GitHub authorization is missing or revoked.</p>
         <div className="github-actions">
           <a className="button-link" href={githubConnectUrl(integration.id)}>
             Reconnect GitHub
@@ -103,8 +103,8 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
   }
 
   return (
-    <div className="github-panel">
-      {loading ? <p className="muted">Loading GitHub profile…</p> : null}
+    <div>
+      {loading ? <p className="lg-note">Loading GitHub profile…</p> : null}
       {profile ? (
         <div className="github-profile">
           {profile.avatar_url ? (
@@ -120,7 +120,7 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
                 <>@{profile.login}</>
               )}
             </p>
-            <p className="muted">
+            <p className="lg-note">
               Connected · {profile.public_repos ?? 0} public repos
               {integration.last_checked_at
                 ? ` · last checked ${new Date(integration.last_checked_at).toLocaleString()}`
