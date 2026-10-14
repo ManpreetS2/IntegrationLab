@@ -438,6 +438,14 @@ html[data-theme='dark'] .ledger-gate .appearance-option.is-selected {
   overflow-wrap: anywhere;
 }
 
+.lg-id {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 .lg-section-label {
   margin: 26px 0 8px;
   color: var(--lg-muted);
@@ -631,6 +639,14 @@ html[data-theme='dark'] .ledger-gate .appearance-option.is-selected {
   font-weight: 500;
   letter-spacing: -0.02em;
   overflow-wrap: break-word;
+}
+
+.lg-trail-title.lg-id {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  line-height: 1.35;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .lg-station {

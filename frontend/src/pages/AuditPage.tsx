@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { listAuditEvents } from '../api'
 import EvidenceTrail from '../components/ledger/EvidenceTrail'
+import IdentifierText from '../components/ledger/IdentifierText'
 import LedgerList from '../components/ledger/LedgerList'
 import SectionStatus from '../components/SectionStatus'
 import { formatTime } from '../format'
@@ -80,8 +81,8 @@ function AuditPage() {
                 detail: shorten(item.safe_summary, 90),
                 cells: [
                   formatTime(item.created_at),
-                  <span key="action" className="lg-mono">
-                    {item.action}
+                  <span key="action" className="lg-id">
+                    <IdentifierText value={item.action} />
                   </span>,
                   item.target_type,
                   item.outcome,
@@ -93,10 +94,7 @@ function AuditPage() {
             />
           ) : null}
         </div>
-        <EvidenceTrail
-          title={(selected?.action ?? 'Event').replaceAll('_', '_\u200b')}
-          stations={auditStations(selected)}
-        />
+        <EvidenceTrail title={selected?.action ?? 'Event'} stations={auditStations(selected)} identifier />
       </div>
     </div>
   )
