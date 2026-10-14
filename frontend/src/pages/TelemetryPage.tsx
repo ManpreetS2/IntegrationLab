@@ -1,10 +1,17 @@
 import { useCallback, useState } from 'react'
 import type { FormEvent } from 'react'
-import { getTelemetryHealth, listTelemetryEvents } from '../api'
+import { getTelemetryHealth, listIngestionCredentials, listTelemetryEvents } from '../api'
+import EvidenceTrail from '../components/ledger/EvidenceTrail'
+import LedgerList, { HealthWord, LedgerFilters } from '../components/ledger/LedgerList'
+import ObservationSequence from '../components/ledger/ObservationSequence'
+import SupportCaseDrawer from '../components/ledger/SupportCaseDrawer'
 import SectionStatus from '../components/SectionStatus'
-import { HealthBadge } from '../components/StatusBadges'
-import { formatCount, formatErrorRate, formatMs, formatP95, formatTime } from '../format'
+import { formatErrorRate, formatMs, formatP95, formatTime } from '../format'
 import { navigate, pageHref, useResource } from '../hooks'
+import { draftFromTelemetry, type CaseDraft } from '../ledger/case'
+import { telemetryFinding } from '../ledger/copy'
+import { marksFromTelemetry } from '../ledger/sequence'
+import { telemetryStations } from '../ledger/trail'
 import { recordForSelection, recordsForSelection } from '../viewSelection'
 import type { Integration, TelemetryErrorCategory, TelemetryEvent } from '../types'
 
@@ -21,11 +28,20 @@ function categoryLabel(value: string | null): string {
   return value.replaceAll('_', ' ')
 }
 
+function matchesEvent(event: TelemetryEvent, service: string, statusCode: string, category: string): boolean {
+  if (service && !event.service.toLowerCase().includes(service.trim().toLowerCase())) return false
+  if (statusCode.trim() && String(event.status_code ?? '') !== statusCode.trim()) return false
+  if (category && event.error_category !== category) return false
+  return true
+}
+
 function TelemetryPage({
   integrations,
+  integrationsLoaded,
   requestedIntegrationId,
 }: {
   integrations: Integration[]
+  integrationsLoaded: boolean
   requestedIntegrationId: string | null
 }) {
   const instrumented = integrations.filter((item) => item.provider === 'instrumented_http')
@@ -34,6 +50,7 @@ function TelemetryPage({
   const [integrationId, setIntegrationId] = useState(requestedId)
   if (integrationId !== requestedId) setIntegrationId(requestedId)
 
+  const [windowHours, setWindowHours] = useState(24)
   const [service, setService] = useState('')
   const [statusCode, setStatusCode] = useState('')
   const [category, setCategory] = useState<TelemetryErrorCategory | ''>('')
@@ -42,6 +59,9 @@ function TelemetryPage({
   const [appliedCategory, setAppliedCategory] = useState<TelemetryErrorCategory | ''>('')
   const [cursor, setCursor] = useState<string | undefined>(undefined)
   const [previousCursors, setPreviousCursors] = useState<Array<string | undefined>>([])
+  const [pickedEventId, setPickedEventId] = useState<string | null>(null)
+  const [draft, setDraft] = useState<CaseDraft | null>(null)
+  const closeDrawer = useCallback(() => setDraft(null), [])
   const [filterOwner, setFilterOwner] = useState(integrationId)
   if (filterOwner !== integrationId) {
     setFilterOwner(integrationId)
@@ -53,28 +73,51 @@ function TelemetryPage({
     setAppliedCategory('')
     setCursor(undefined)
     setPreviousCursors([])
+    setPickedEventId(null)
   }
 
   const loadHealth = useCallback(
-    () => (integrationId ? getTelemetryHealth(integrationId, 24) : Promise.reject(new Error('No application'))),
-    [integrationId],
+    () => (integrationId ? getTelemetryHealth(integrationId, windowHours) : Promise.reject(new Error('No application'))),
+    [integrationId, windowHours],
   )
   const loadEvents = useCallback(async () => {
     if (!integrationId) return Promise.reject(new Error('No application'))
     const parsedStatus = appliedStatusCode.trim() === '' ? undefined : Number(appliedStatusCode)
+    const occurredAfter = new Date(Date.now() - windowHours * 3600_000).toISOString()
     const page = await listTelemetryEvents({
       integration_id: integrationId,
       service: appliedService.trim() || undefined,
       status_code: parsedStatus !== undefined && Number.isInteger(parsedStatus) ? parsedStatus : undefined,
       error_category: appliedCategory || undefined,
+      occurred_after: occurredAfter,
       limit: 50,
       cursor,
     })
-    return { ownerId: integrationId, records: [page] }
-  }, [integrationId, appliedService, appliedStatusCode, appliedCategory, cursor])
+    return {
+      ownerId: `${integrationId}:${windowHours}:${appliedService}:${appliedStatusCode}:${appliedCategory}:${cursor ?? ''}`,
+      records: [page],
+    }
+  }, [integrationId, appliedService, appliedStatusCode, appliedCategory, cursor, windowHours])
+  const loadSequence = useCallback(async () => {
+    if (!integrationId) return Promise.reject(new Error('No application'))
+    const occurredAfter = new Date(Date.now() - windowHours * 3600_000).toISOString()
+    const page = await listTelemetryEvents({
+      integration_id: integrationId,
+      occurred_after: occurredAfter,
+      limit: 50,
+    })
+    return { ownerId: `${integrationId}:${windowHours}`, records: page.items }
+  }, [integrationId, windowHours])
+  const loadCredentials = useCallback(async () => {
+    if (!integrationId) return Promise.reject(new Error('No application'))
+    const records = await listIngestionCredentials(integrationId)
+    return { ownerId: integrationId, records }
+  }, [integrationId])
 
   const health = useResource(integrationId ? loadHealth : null)
   const events = useResource(integrationId ? loadEvents : null)
+  const sequence = useResource(integrationId ? loadSequence : null)
+  const credentials = useResource(integrationId ? loadCredentials : null)
 
   function applyFilters(event: FormEvent) {
     event.preventDefault()
@@ -83,259 +126,253 @@ function TelemetryPage({
     setAppliedCategory(category)
     setCursor(undefined)
     setPreviousCursors([])
-    health.reload()
   }
+
+  if (!integrationsLoaded) return null
 
   if (instrumented.length === 0) {
     return (
-      <section className="panel">
-        <h2>SDK-reported telemetry</h2>
-        <p className="empty-state">
-          No instrumented applications yet. Register one on{' '}
-          <a href={pageHref('integrations')}>Integrations</a>. These observations are not the provider
-          request log.
+      <section>
+        <h1 className="lg-finding">No instrumented applications yet.</h1>
+        <p className="lg-note">
+          Register one on <a href={pageHref('integrations')}>Integrations</a>. These observations are not the
+          provider request log.
         </p>
       </section>
     )
   }
 
-  const shownHealth = recordForSelection(integrationId, health.data)
-  const metrics = shownHealth?.metrics
-  const page = recordsForSelection(integrationId, events.data)?.[0]
+  const loadedHealth = recordForSelection(integrationId, health.data)
+  const shownHealth = loadedHealth?.window_hours === windowHours ? loadedHealth : undefined
+  const eventScope = integrationId
+    ? `${integrationId}:${windowHours}:${appliedService}:${appliedStatusCode}:${appliedCategory}:${cursor ?? ''}`
+    : null
+  const page = recordsForSelection(eventScope, events.data)?.[0]
+  const sequenceEvents = recordsForSelection(integrationId ? `${integrationId}:${windowHours}` : null, sequence.data)
+  const credentialRows = recordsForSelection(integrationId, credentials.data)
+  const activePrefix = credentialRows?.find((item) => item.revoked_at === null)?.key_prefix ?? null
+  const latest = [...(sequenceEvents ?? [])].sort((a, b) => a.occurred_at.localeCompare(b.occurred_at)).at(-1) ?? null
+  const selectedEvent =
+    sequenceEvents?.find((item) => item.event_id === pickedEventId) ??
+    page?.items.find((item) => item.event_id === pickedEventId) ??
+    latest
+  const marks = sequenceEvents
+    ? marksFromTelemetry(sequenceEvents, {
+        selectedId: selectedEvent?.event_id,
+        dimmed: (item) => !matchesEvent(item, appliedService, appliedStatusCode, appliedCategory),
+      })
+    : []
+  const finding = shownHealth ? telemetryFinding(shownHealth) : 'SDK telemetry'
+  const stations = telemetryStations(selectedEvent ?? null, shownHealth, activePrefix)
+
+  function openCase(eventId?: string) {
+    const event =
+      sequenceEvents?.find((item) => item.event_id === eventId) ??
+      page?.items.find((item) => item.event_id === eventId) ??
+      selectedEvent
+    if (!event) return
+    setPickedEventId(event.event_id)
+    setDraft(draftFromTelemetry(event, shownHealth))
+  }
 
   return (
-    <>
-      <section className="banner" role="note">
-        <strong>SDK-reported.</strong>
-        <p>
-          These rows are what the application SDK sent. IntegrationLab did not independently contact
-          the upstream service. They are not GitHub or Stripe provider requests.
-        </p>
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Application</h2>
-          {shownHealth ? <HealthBadge state={shownHealth.health} /> : null}
-        </div>
-        <form className="webhook-toolbar" onSubmit={applyFilters}>
-          <label>
-            Integration
-            <select
-              value={integrationId ?? ''}
-              onChange={(event) => {
-                navigate('telemetry', { integration: event.target.value })
+    <div className={health.loading || events.loading ? 'lg-busy' : undefined} aria-busy={health.loading || events.loading || undefined}>
+      <div className="lg-page">
+        <div className="lg-main">
+          <p className="lg-kicker" role="status">
+            Telemetry · last {windowHours}h
+            {health.loading || events.loading ? <span className="lg-refresh">Refreshing…</span> : null}
+          </p>
+          <h1 className="lg-finding">{finding}</h1>
+          {shownHealth ? (
+            <p className="lg-status">
+              <HealthWord state={shownHealth.health} />
+              <span>{shownHealth.summary}</span>
+            </p>
+          ) : null}
+          <p className="lg-note">SDK-reported. IntegrationLab did not contact the upstream service.</p>
+          <form className="lg-toolbar" onSubmit={applyFilters}>
+            <label className="lg-field">
+              Integration
+              <select
+                value={integrationId ?? ''}
+                onChange={(event) => {
+                  navigate('telemetry', { integration: event.target.value })
+                  setCursor(undefined)
+                  setPreviousCursors([])
+                }}
+              >
+                {instrumented.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · {item.environment}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <LedgerFilters
+              label="Window"
+              value={String(windowHours)}
+              onChange={(id) => {
+                setWindowHours(Number(id))
                 setCursor(undefined)
                 setPreviousCursors([])
               }}
-            >
-              {instrumented.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} · {item.environment}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Service
-            <input value={service} onChange={(event) => setService(event.target.value)} placeholder="orders-api" />
-          </label>
-          <label>
-            Status code
-            <input
-              inputMode="numeric"
-              value={statusCode}
-              onChange={(event) => setStatusCode(event.target.value)}
-              placeholder="200–599"
+              options={[
+                { id: '24', label: '24h' },
+                { id: '168', label: '7 days' },
+              ]}
             />
-          </label>
-          <label>
-            Failure category
-            <select value={category} onChange={(event) => setCategory(event.target.value as TelemetryErrorCategory | '')}>
-              <option value="">All</option>
-              {CATEGORIES.map((item) => (
-                <option key={item} value={item}>
-                  {categoryLabel(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="submit">Apply</button>
-        </form>
-      </section>
-
-      <SectionStatus
-        loading={health.loading}
-        error={health.error}
-        hasData={Boolean(shownHealth)}
-        onRetry={health.reload}
-        loadingText="Loading SDK health…"
-      />
-
-      {shownHealth && metrics ? (
-        <section className="panel">
-          <h2>Evidence-backed health</h2>
-          <p>{shownHealth.summary}</p>
-          <p className="muted small-text">
-            Provenance {shownHealth.provenance}. Independently verified: no. Window {shownHealth.window_hours}h.
-          </p>
-          <div className="summary-grid totals-grid">
-            <article className="summary-card">
-              <p className="summary-label">Observations</p>
-              <p className="summary-value">{formatCount(metrics.request_count)}</p>
-            </article>
-            <article className="summary-card">
-              <p className="summary-label">Successes</p>
-              <p className="summary-value">{formatCount(metrics.success_count)}</p>
-            </article>
-            <article className={`summary-card${metrics.error_count > 0 ? ' total-failed' : ''}`}>
-              <p className="summary-label">Errors</p>
-              <p className={metrics.error_count > 0 ? 'summary-value' : 'summary-value is-zero'}>
-                {formatCount(metrics.error_count)}
-              </p>
-            </article>
-            <article className="summary-card">
-              <p className="summary-label">Error rate</p>
-              <p className="summary-value summary-value-text">{formatErrorRate(metrics.error_rate)}</p>
-            </article>
+            <label className="lg-field">
+              Service
+              <input value={service} onChange={(event) => setService(event.target.value)} placeholder="orders-api" />
+            </label>
+            <label className="lg-field">
+              Status code
+              <input
+                inputMode="numeric"
+                value={statusCode}
+                onChange={(event) => setStatusCode(event.target.value)}
+                placeholder="200–599"
+              />
+            </label>
+            <label className="lg-field">
+              Failure category
+              <select value={category} onChange={(event) => setCategory(event.target.value as TelemetryErrorCategory | '')}>
+                <option value="">All</option>
+                {CATEGORIES.map((item) => (
+                  <option key={item} value={item}>
+                    {categoryLabel(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="submit">Apply</button>
+          </form>
+          <SectionStatus
+            loading={health.loading}
+            error={health.error}
+            hasData={Boolean(shownHealth)}
+            onRetry={health.reload}
+            loadingText="Loading SDK health…"
+          />
+          {shownHealth ? (
+            <RuleFacts
+              rows={[
+                ['Observations', String(shownHealth.metrics.request_count)],
+                ['Errors', String(shownHealth.metrics.error_count)],
+                ['Error rate', formatErrorRate(shownHealth.metrics.error_rate)],
+                ['p95', formatP95(shownHealth.metrics.p95_latency_ms, shownHealth.metrics.sample_count)],
+              ]}
+            />
+          ) : null}
+          {shownHealth && shownHealth.metrics.sample_count < 20 ? (
+            <p className="lg-note">p95 latency stays unavailable until at least 20 observations.</p>
+          ) : null}
+          <SectionStatus
+            loading={sequence.loading}
+            error={sequence.error}
+            hasData={Boolean(sequenceEvents)}
+            onRetry={sequence.reload}
+            loadingText="Loading observations…"
+          />
+          {sequenceEvents ? (
+            <ObservationSequence marks={marks} onSelect={setPickedEventId} />
+          ) : null}
+          <p className="lg-section-label">Observations</p>
+          <SectionStatus
+            loading={events.loading}
+            error={events.error}
+            hasData={Boolean(page)}
+            onRetry={events.reload}
+            loadingText="Loading SDK observations…"
+          />
+          {page && page.items.length === 0 ? <p className="lg-empty">No SDK-reported observations match these filters.</p> : null}
+          {page && page.items.length > 0 ? (
+            <LedgerList
+              label="SDK observations"
+              columns={['Observed', 'Route', 'Status', 'Duration', 'Category']}
+              rows={page.items.map((item) => ({
+                id: item.event_id,
+                title: `${item.method} ${item.route_template}`,
+                meta: item.status_code ?? categoryLabel(item.error_category),
+                detail: formatTime(item.occurred_at),
+                cells: [
+                  formatTime(item.occurred_at),
+                  <span key="route" className="lg-mono">
+                    {item.method} {item.route_template}
+                  </span>,
+                  item.status_code ?? '—',
+                  formatMs(item.duration_ms),
+                  categoryLabel(item.error_category),
+                ],
+              }))}
+              selectedId={selectedEvent?.event_id ?? null}
+              onSelect={setPickedEventId}
+              onOpen={(id) => openCase(id)}
+              emptyText="No SDK-reported observations match these filters."
+            />
+          ) : null}
+          <div className="lg-pager">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={previousCursors.length === 0}
+              onClick={() => {
+                const prior = previousCursors.slice(0, -1)
+                setPreviousCursors(prior)
+                setCursor(prior.at(-1))
+              }}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!page?.next_cursor}
+              onClick={() => {
+                if (!page?.next_cursor) return
+                setPreviousCursors((items) => [...items, cursor])
+                setCursor(page.next_cursor ?? undefined)
+              }}
+            >
+              Next
+            </button>
           </div>
-          <dl className="fact-grid">
-            <div>
-              <dt>Average latency</dt>
-              <dd>{formatMs(metrics.average_latency_ms)}</dd>
+          {selectedEvent ? (
+            <div className="lg-mobile-action">
+              <button type="button" className="lg-case-button" onClick={() => openCase(selectedEvent.event_id)}>
+                Open support case
+              </button>
             </div>
-            <div>
-              <dt>p95 latency</dt>
-              <dd>{formatP95(metrics.p95_latency_ms, metrics.sample_count)}</dd>
-            </div>
-            <div>
-              <dt>Latest</dt>
-              <dd>
-                {metrics.latest_service ?? '—'} {metrics.latest_route_template ?? ''}{' '}
-                {metrics.latest_status_code ?? metrics.latest_error_category ?? '—'}
-              </dd>
-            </div>
-            <div>
-              <dt>Samples</dt>
-              <dd>{formatCount(metrics.sample_count)}</dd>
-            </div>
-          </dl>
-          {metrics.sample_count < 20 ? (
-            <p className="muted small-text">p95 latency stays unavailable until at least 20 observations.</p>
           ) : null}
-          {metrics.failure_categories.length > 0 ? (
-            <ul className="evidence-list">
-              {metrics.failure_categories.map((item) => (
-                <li key={item.category}>
-                  {categoryLabel(item.category)} · {item.count}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <ul className="evidence-list">
-            {shownHealth.evidence.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          {shownHealth.recommended_action ? (
-            <p className="recommendation">
-              <strong>Next step:</strong> {shownHealth.recommended_action}
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Observations</h2>
-          <button type="button" className="secondary-button" onClick={events.reload}>
-            Refresh
-          </button>
         </div>
-        <SectionStatus
-          loading={events.loading}
-          error={events.error}
-          hasData={Boolean(page)}
-          onRetry={events.reload}
-          loadingText="Loading SDK observations…"
+        <EvidenceTrail
+          title="Evidence"
+          stations={stations}
+          action={
+            selectedEvent ? (
+              <button type="button" className="lg-case-button" onClick={() => openCase(selectedEvent.event_id)}>
+                Open support case
+              </button>
+            ) : null
+          }
         />
-        {page && page.items.length === 0 ? (
-          <p className="empty-state">No SDK-reported observations match these filters.</p>
-        ) : null}
-        {page && page.items.length > 0 ? <EventTable items={page.items} /> : null}
-        <div className="button-row">
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={previousCursors.length === 0}
-            onClick={() => {
-              const prior = previousCursors.slice(0, -1)
-              setPreviousCursors(prior)
-              setCursor(prior.at(-1))
-            }}
-          >
-            Previous
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={!page?.next_cursor}
-            onClick={() => {
-              if (!page?.next_cursor) return
-              setPreviousCursors((items) => [...items, cursor])
-              setCursor(page.next_cursor ?? undefined)
-            }}
-          >
-            Next
-          </button>
-        </div>
-      </section>
-    </>
+      </div>
+      {draft ? <SupportCaseDrawer key={`${draft.integrationId}:${draft.title}`} draft={draft} onClose={closeDrawer} /> : null}
+    </div>
   )
 }
 
-function EventTable({ items }: { items: TelemetryEvent[] }) {
+function RuleFacts({ rows }: { rows: [string, string][] }) {
   return (
-    <div className="table-wrap">
-      <table className="integrations-table">
-        <thead>
-          <tr>
-            <th>Observed</th>
-            <th>Received</th>
-            <th>Service</th>
-            <th>Method</th>
-            <th>Route template</th>
-            <th>Status</th>
-            <th>Duration</th>
-            <th>Category</th>
-            <th>Environment</th>
-            <th>SDK</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.event_id}>
-              <td className="nowrap">{formatTime(item.occurred_at)}</td>
-              <td className="nowrap">{formatTime(item.received_at)}</td>
-              <td>{item.service}</td>
-              <td>{item.method}</td>
-              <td>
-                <code>{item.route_template}</code>
-              </td>
-              <td>{item.status_code ?? '—'}</td>
-              <td>{formatMs(item.duration_ms)}</td>
-              <td>{categoryLabel(item.error_category)}</td>
-              <td>{item.environment}</td>
-              <td className="muted small-text">
-                {item.sdk_name ?? '—'}
-                {item.sdk_version ? ` ${item.sdk_version}` : ''}
-                <div>SDK-reported</div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <dl className="lg-rules">
+      {rows.map(([label, text]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{text}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 

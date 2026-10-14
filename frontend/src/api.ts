@@ -340,8 +340,13 @@ export function getReliabilityOverview(windowHours = 24): Promise<ReliabilityOve
   return request<ReliabilityOverview>(`${RELIABILITY}/overview${toQuery({ window_hours: windowHours })}`)
 }
 
-export function getIntegrationReliability(integrationId: string): Promise<IntegrationReliabilityDetail> {
-  return request<IntegrationReliabilityDetail>(`${RELIABILITY}/integrations/${integrationId}`)
+export function getIntegrationReliability(
+  integrationId: string,
+  windowHours = 24,
+): Promise<IntegrationReliabilityDetail> {
+  return request<IntegrationReliabilityDetail>(
+    `${RELIABILITY}/integrations/${integrationId}${toQuery({ window_hours: windowHours })}`,
+  )
 }
 
 export function listReliabilityFailures(params: {

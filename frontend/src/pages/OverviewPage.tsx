@@ -1,45 +1,262 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, getReliabilityOverview, listReliabilityFailures } from '../api'
-import FailuresTable from '../components/FailuresTable'
-import { HealthBadge } from '../components/StatusBadges'
-import IntegrationHealthCard from '../components/IntegrationHealthCard'
+import { getIntegrationReliability, getReliabilityOverview } from '../api'
+import EvidenceTrail from '../components/ledger/EvidenceTrail'
+import LedgerList, { HealthWord, LedgerFilters, RuleList } from '../components/ledger/LedgerList'
+import ObservationSequence from '../components/ledger/ObservationSequence'
+import SupportCaseDrawer from '../components/ledger/SupportCaseDrawer'
 import SectionStatus from '../components/SectionStatus'
 import { formatCount, formatProvider, formatTime } from '../format'
 import { pageHref, useResource } from '../hooks'
-import type { HealthState, IntegrationHealth, OperationalMetrics } from '../types'
+import { draftFromIntegration, type CaseDraft } from '../ledger/case'
+import {
+  attentionHeadline,
+  latestActivity,
+  matchesOverviewFilter,
+  shorten,
+  whyRows,
+  windowTally,
+  type OverviewFilter,
+} from '../ledger/copy'
+import { marksFromRequests, marksFromTelemetry, marksFromWebhooks, type SequenceMark } from '../ledger/sequence'
+import { integrationStations } from '../ledger/trail'
+import { recordForSelection } from '../viewSelection'
+import type { HealthState, IntegrationReliabilityDetail, OperationalMetrics } from '../types'
 
 const AUTO_REFRESH_MS = 60_000
 
-const TOTAL_CARDS: { state: HealthState; label: string }[] = [
-  { state: 'healthy', label: 'Healthy' },
-  { state: 'degraded', label: 'Degraded' },
-  { state: 'failed', label: 'Failed' },
-  { state: 'unknown', label: 'Unknown' },
-]
-
-function loadOverview() {
-  return getReliabilityOverview(24)
-}
-
 const ALERT_LABELS = new Set(['Real provider errors', 'Failed', 'SDK-reported errors'])
 
-function metricClass(label: string, value: number): string | undefined {
-  if (ALERT_LABELS.has(label) && value > 0) return 'is-alert'
-  return undefined
+function OverviewPage() {
+  const [windowHours, setWindowHours] = useState(24)
+  const [filter, setFilter] = useState<OverviewFilter>('all')
+  const [pickedId, setPickedId] = useState<string | null>(null)
+  const [markId, setMarkId] = useState<string | null>(null)
+  const [draft, setDraft] = useState<CaseDraft | null>(null)
+  const closeDrawer = useCallback(() => setDraft(null), [])
+
+  const loadOverview = useCallback(() => getReliabilityOverview(windowHours), [windowHours])
+  const overview = useResource(loadOverview)
+  const reload = overview.reload
+
+  useEffect(() => {
+    const timer = window.setInterval(reload, AUTO_REFRESH_MS)
+    return () => window.clearInterval(timer)
+  }, [reload])
+
+  const data = overview.data
+  const items = data?.integrations ?? []
+  const visible = items.filter((item) => matchesOverviewFilter(item, filter))
+  const selected =
+    visible.find((item) => item.integration_id === pickedId) ??
+    (pickedId === null
+      ? (visible.find((item) => item.health === 'degraded' || item.health === 'failed') ?? visible[0] ?? null)
+      : (visible[0] ?? null))
+
+  const selectedId = selected?.integration_id ?? null
+  const detail = useIntegrationDetail(selectedId, windowHours)
+  const loadedDetail = recordForSelection(selected?.integration_id, detail.data)
+  const shown = loadedDetail?.window_hours === windowHours ? loadedDetail : undefined
+  const marks = shown ? marksForDetail(shown, markId) : []
+  const selectedMark = marks.find((mark) => mark.id === markId) ?? null
+
+  const failed = data?.totals.failed ?? 0
+  const degraded = data?.totals.degraded ?? 0
+  const finding = data ? attentionHeadline(failed, degraded, items.length) : 'Overview'
+  const stations = [
+    ...(selectedMark
+      ? [{ label: 'Selected', text: shorten(`${selectedMark.title} · ${selectedMark.detail}`, 140) }]
+      : []),
+    ...(selected ? integrationStations(selected, windowHours) : []),
+  ].slice(0, 5)
+
+  function openCase(id: string) {
+    const item = visible.find((entry) => entry.integration_id === id) ?? selected
+    if (!item) return
+    setPickedId(item.integration_id)
+    setDraft(draftFromIntegration(item))
+  }
+
+  return (
+    <div className={overview.loading ? 'lg-busy' : undefined} aria-busy={overview.loading || undefined}>
+      <SectionStatus
+        loading={overview.loading}
+        error={overview.error}
+        hasData={Boolean(data)}
+        onRetry={overview.reload}
+        loadingText="Loading overview…"
+      />
+      {data ? (
+        <div className="lg-page">
+          <div className="lg-main">
+            <p className="lg-kicker" role="status">
+              Overview · last {windowHours}h
+              {overview.loading ? <span className="lg-refresh">Refreshing…</span> : null}
+            </p>
+            <h1 className="lg-finding">{finding}</h1>
+            <p className="lg-status">
+              <CountLamp count={data.totals.failed} state="failed" label="failed" />
+              <CountLamp count={data.totals.degraded} state="degraded" label="degraded" />
+              <span className="lg-count is-zero">
+                {data.totals.healthy} healthy · {data.totals.unknown} unknown · {data.totals.not_configured} not configured
+              </span>
+            </p>
+            <div className="lg-toolbar">
+              <LedgerFilters
+                label="Integrations"
+                value={filter}
+                onChange={(id) => setFilter(id as OverviewFilter)}
+                options={[
+                  { id: 'all', label: `All ${items.length}` },
+                  {
+                    id: 'attention',
+                    label: `Needs attention ${items.filter((item) => item.health === 'degraded' || item.health === 'failed').length}`,
+                  },
+                  { id: 'sdk', label: 'SDK' },
+                  { id: 'webhook', label: 'Webhooks' },
+                  { id: 'quiet', label: 'Not configured' },
+                ]}
+              />
+              <LedgerFilters
+                label="Window"
+                value={String(windowHours)}
+                onChange={(id) => setWindowHours(Number(id))}
+                options={[
+                  { id: '24', label: '24h' },
+                  { id: '168', label: '7 days' },
+                ]}
+              />
+            </div>
+            <p className="lg-note">
+              Showing {visible.length} of {items.length}.
+            </p>
+            <LedgerList
+              label="Integrations"
+              columns={['Integration', 'Health', 'Window', 'Latest']}
+              rows={visible.map((item) => ({
+                id: item.integration_id,
+                title: item.name,
+                meta: <HealthWord state={item.health} />,
+                detail: `${windowTally(item)} · ${latestActivity(item)}`,
+                cells: [
+                  <span key="name">
+                    <strong>{item.name}</strong>
+                    <span className="lg-muted"> · {formatProvider(item.provider)}</span>
+                  </span>,
+                  <HealthWord key="health" state={item.health} />,
+                  windowTally(item),
+                  <span key="latest" className="lg-mono">
+                    {latestActivity(item)}
+                  </span>,
+                ],
+              }))}
+              selectedId={selected?.integration_id ?? null}
+              onSelect={(id) => {
+                setPickedId(id)
+                setMarkId(null)
+              }}
+              onOpen={openCase}
+              emptyText="Nothing in this filter."
+            />
+            {selected ? (
+              <>
+                <p className="lg-section-label">Why this state</p>
+                {detail.loading && !shown ? <p className="lg-empty">Loading observations…</p> : null}
+                {detail.error ? (
+                  <SectionStatus
+                    loading={false}
+                    error={detail.error}
+                    hasData={false}
+                    onRetry={detail.reload}
+                    loadingText="Loading observations…"
+                  />
+                ) : null}
+                {shown ? (
+                  <ObservationSequence
+                    marks={marks}
+                    onSelect={(id) => {
+                      setMarkId(id)
+                    }}
+                  />
+                ) : null}
+                <RuleList rows={whyRows(selected)} />
+                <p className="lg-note">{shorten(selected.summary, 180)}</p>
+              </>
+            ) : null}
+            {data.recent_failures.length > 0 ? (
+              <>
+                <p className="lg-section-label">Recent failures</p>
+                <ul className="lg-links">
+                  {data.recent_failures.slice(0, 5).map((item) => (
+                    <li key={item.id}>
+                      <a href={pageHref('failures')}>
+                        {formatTime(item.occurred_at)} · {item.code}
+                      </a>
+                      <span className="lg-muted"> · {shorten(item.summary, 90)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            <p className="lg-section-label">This window</p>
+            <OperationalList metrics={data.operational} />
+            {selected ? (
+              <div className="lg-mobile-action">
+                <button type="button" className="lg-case-button" onClick={() => openCase(selected.integration_id)}>
+                  Open support case
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <EvidenceTrail
+            title={selected?.name ?? 'Evidence'}
+            stations={stations}
+            action={
+              selected ? (
+                <button type="button" className="lg-case-button" onClick={() => openCase(selected.integration_id)}>
+                  Open support case
+                </button>
+              ) : null
+            }
+          />
+        </div>
+      ) : null}
+      {draft ? <SupportCaseDrawer key={draft.title} draft={draft} onClose={closeDrawer} /> : null}
+    </div>
+  )
 }
 
-function headline(failed: number, degraded: number, count: number): string {
-  if (failed > 0 && degraded > 0) return `${failed} failed and ${degraded} degraded.`
-  if (failed === 1) return 'One integration has failed.'
-  if (failed > 1) return `${failed} integrations have failed.`
-  if (degraded === 1) return 'One integration needs attention.'
-  if (degraded > 1) return `${degraded} integrations need attention.`
-  if (count === 0) return 'No integrations yet.'
-  return 'Stored evidence shows no failing integrations.'
+function useIntegrationDetail(id: string | null, windowHours: number) {
+  const load = useCallback(
+    () => (id ? getIntegrationReliability(id, windowHours) : Promise.reject(new Error('No integration'))),
+    [id, windowHours],
+  )
+  return useResource(id ? load : null)
 }
 
-function OperationalGrid({ metrics, windowHours }: { metrics: OperationalMetrics; windowHours: number }) {
-  const windowed: [string, number][] = [
+function marksForDetail(detail: IntegrationReliabilityDetail, markId: string | null): SequenceMark[] {
+  if (detail.provider === 'instrumented_http') {
+    return marksFromTelemetry(detail.recent_telemetry_events, { selectedId: markId })
+  }
+  if (detail.provider === 'stripe') {
+    const start = Date.parse(detail.generated_at) - detail.window_hours * 3600_000
+    const events = detail.recent_webhook_events.filter((event) => Date.parse(event.last_received_at) >= start)
+    return marksFromWebhooks(events, markId)
+  }
+  return marksFromRequests(detail.recent_requests, markId)
+}
+
+function CountLamp({ count, state, label }: { count: number; state: HealthState; label: string }) {
+  if (count === 0) return <span className="lg-count is-zero">0 {label}</span>
+  return (
+    <span className={`lg-health lg-health-${state === 'failed' ? 'bad' : 'warn'}`}>
+      <span className={`lg-lamp ${state === 'failed' ? 'bad' : 'warn'}`} aria-hidden="true" />
+      {count} {label}
+    </span>
+  )
+}
+
+function OperationalList({ metrics }: { metrics: OperationalMetrics }) {
+  const rows: [string, number][] = [
     ['Real provider requests', metrics.real_provider_requests],
     ['Real provider errors', metrics.real_provider_errors],
     ['Simulated requests', metrics.simulated_requests],
@@ -47,261 +264,24 @@ function OperationalGrid({ metrics, windowHours }: { metrics: OperationalMetrics
     ['Webhook events received', metrics.webhook_events_received],
     ['Duplicate deliveries absorbed', metrics.duplicate_webhook_deliveries],
     ['Diagnostic runs', metrics.diagnostic_runs],
-  ]
-  const sdk: [string, number][] = [
-    ['SDK-reported observations', metrics.sdk_reported_observations ?? 0],
-    ['SDK-reported errors', metrics.sdk_reported_errors ?? 0],
-  ]
-  const queue: [string, number][] = [
     ['Processed', metrics.webhook_processed],
     ['Pending', metrics.webhook_pending],
     ['Retry scheduled', metrics.webhook_retry_scheduled],
     ['Failed', metrics.webhook_failed],
+    ['SDK-reported observations', metrics.sdk_reported_observations],
+    ['SDK-reported errors', metrics.sdk_reported_errors],
   ]
   return (
-    <div className="metric-groups">
-      <div>
-        <h3 className="group-title">Last {windowHours}h</h3>
-        <dl className="metric-list">
-          {windowed.map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd className={metricClass(label, value)}>{formatCount(value)}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-      <div>
-        <h3 className="group-title">SDK-reported, not verified</h3>
-        <p className="muted small-text">These counts are not included in real provider requests.</p>
-        <dl className="metric-list">
-          {sdk.map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd className={metricClass(label, value)}>{formatCount(value)}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-      <div>
-        <h3 className="group-title">Current webhook queue</h3>
-        <dl className="metric-list">
-          {queue.map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd className={metricClass(label, value)}>{formatCount(value)}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-    </div>
-  )
-}
-
-const HEALTH_RANK: Record<HealthState, number> = {
-  failed: 0,
-  degraded: 1,
-  unknown: 2,
-  healthy: 3,
-  not_configured: 4,
-}
-
-function ordered(items: IntegrationHealth[]): IntegrationHealth[] {
-  return [...items].sort((a, b) => HEALTH_RANK[a.health] - HEALTH_RANK[b.health])
-}
-
-function Attention({ items }: { items: IntegrationHealth[] }) {
-  const attention = items.filter((item) => item.health === 'failed' || item.health === 'degraded')
-  if (attention.length === 0) return null
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Needs attention</h2>
-      </div>
-      <div className="health-list">
-        {attention.map((item) => (
-          <article key={item.integration_id} className="health-row">
-            <div className="health-row-main">
-              <span className="provider-mark" aria-hidden="true">
-                {item.provider.slice(0, 1).toUpperCase()}
-              </span>
-              <span className="health-row-copy">
-                <strong>{item.name}</strong>
-                <span>
-                  {formatProvider(item.provider)} · {item.summary}
-                </span>
-              </span>
-              <HealthBadge state={item.health} />
-              <a
-                className="button-link"
-                href={
-                  item.provider === 'instrumented_http'
-                    ? pageHref('telemetry', { integration: item.integration_id })
-                    : pageHref('diagnostics', { integration: item.integration_id })
-                }
-              >
-                Inspect
-              </a>
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function OverviewPage() {
-  const [includeSimulated, setIncludeSimulated] = useState(false)
-  const [autoRefresh, setAutoRefresh] = useState(false)
-
-  const overview = useResource(loadOverview)
-  const loadFailures = useCallback(
-    () => listReliabilityFailures({ include_simulated: includeSimulated, limit: 10, window_hours: 24 }),
-    [includeSimulated],
-  )
-  const failures = useResource(loadFailures)
-  const reloadOverview = overview.reload
-  const reloadFailures = failures.reload
-
-  const refreshAll = useCallback(() => {
-    reloadOverview()
-    reloadFailures()
-  }, [reloadOverview, reloadFailures])
-
-  useEffect(() => {
-    if (!autoRefresh) return
-    const timer = window.setInterval(refreshAll, AUTO_REFRESH_MS)
-    return () => window.clearInterval(timer)
-  }, [autoRefresh, refreshAll])
-
-  const data = overview.data
-  const databaseDown = overview.error instanceof ApiError && overview.error.status === 503
-  const refreshing = overview.loading || failures.loading
-
-  return (
     <>
-      <section className="toolbar-row">
-        <p className="muted small-text">
-          {data ? `Generated ${formatTime(data.generated_at)} · window ${data.window_hours}h` : 'Not loaded yet'}
-          {refreshing && data ? ' · Refreshing…' : ''}
-        </p>
-        <div className="toolbar-actions">
-          <label className="inline-check">
-            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
-            Auto-refresh (60s)
-          </label>
-          <button type="button" className="secondary-button" onClick={refreshAll} disabled={refreshing}>
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
-      </section>
-
-      {databaseDown ? (
-        <div className="banner banner-error" role="alert">
-          <strong>Database unavailable</strong>
-          <p>
-            Reliability data cannot be read right now. Integration health is not being evaluated, so
-            no integration is marked failed because of this.
-          </p>
-        </div>
-      ) : (
-        <SectionStatus
-          loading={overview.loading}
-          error={overview.error}
-          hasData={Boolean(data)}
-          onRetry={overview.reload}
-          loadingText="Loading reliability overview…"
-        />
-      )}
-
-      {data && !databaseDown ? (
-        <>
-          <section className="overview-intro">
-            <h2>{headline(data.totals.failed, data.totals.degraded, data.integrations.length)}</h2>
-            <p>
-              Live health uses stored real evidence only. Simulated failures never alter provider health.
-              {data.totals.not_configured > 0
-                ? ` ${data.totals.not_configured} integration${data.totals.not_configured === 1 ? '' : 's'} not configured yet, excluded from the counts.`
-                : ''}
-            </p>
-          </section>
-
-          <div className="summary-grid totals-grid">
-            {TOTAL_CARDS.map((card) => {
-              const value = data.totals[card.state]
-              return (
-                <article key={card.state} className={`summary-card total-${card.state}`}>
-                  <p className="summary-label">{card.label}</p>
-                  <p className={value === 0 ? 'summary-value is-zero' : 'summary-value'}>{value}</p>
-                </article>
-              )
-            })}
+      <dl className="lg-metrics">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd className={ALERT_LABELS.has(label) && value > 0 ? 'lg-health-bad' : undefined}>{formatCount(value)}</dd>
           </div>
-
-          <Attention items={data.integrations} />
-
-          <section className="panel">
-            <div className="panel-header">
-              <h2>Integrations</h2>
-            </div>
-            {data.integrations.length === 0 ? (
-              <p className="empty-state">No integrations yet. Create one on the Integrations page.</p>
-            ) : (
-              <div className="health-list">
-                {ordered(data.integrations).map((item) => (
-                  <IntegrationHealthCard
-                    key={item.integration_id}
-                    item={item}
-                    windowHours={data.window_hours}
-                    defaultOpen={item.health === 'failed' || item.health === 'degraded'}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </>
-      ) : null}
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Recent failures</h2>
-          <label className="inline-check">
-            <input
-              type="checkbox"
-              checked={includeSimulated}
-              onChange={(e) => setIncludeSimulated(e.target.checked)}
-            />
-            Include simulations
-          </label>
-        </div>
-        <SectionStatus
-          loading={failures.loading}
-          error={failures.error}
-          hasData={Boolean(failures.data)}
-          onRetry={failures.reload}
-          loadingText="Loading failures…"
-        />
-        {failures.data ? (
-          <FailuresTable
-            items={failures.data}
-            emptyText={
-              includeSimulated
-                ? 'No failures in the last 24h.'
-                : 'No real failures in the last 24h. Failure Lab simulations are hidden.'
-            }
-          />
-        ) : null}
-      </section>
-
-      {data && !databaseDown ? (
-        <section className="panel">
-          <h2>Operational metrics</h2>
-          <p className="muted small-text">
-            Counts from stored logs and events. No uptime or SLA figures are computed.
-          </p>
-          <OperationalGrid metrics={data.operational} windowHours={data.window_hours} />
-        </section>
-      ) : null}
+        ))}
+      </dl>
+      <p className="lg-metric-note">SDK-reported counts are not included in real provider requests.</p>
     </>
   )
 }
