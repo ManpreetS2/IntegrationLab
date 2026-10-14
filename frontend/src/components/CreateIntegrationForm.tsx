@@ -37,11 +37,10 @@ function CreateIntegrationForm({ onSubmit, disabled = false }: CreateIntegration
   }
 
   return (
-    <form className="create-form" onSubmit={handleSubmit}>
-      <h2>Create integration</h2>
-      <p className="muted">Adds a new record through POST /api/integrations.</p>
+    <form className="lg-form" onSubmit={handleSubmit}>
+      <p className="lg-note">The record is created through the integrations API. A secret is never part of this form.</p>
 
-      <label htmlFor="integration-name">
+      <label className="lg-field" htmlFor="integration-name">
         Display name
         <input
           id="integration-name"
@@ -53,7 +52,7 @@ function CreateIntegrationForm({ onSubmit, disabled = false }: CreateIntegration
         />
       </label>
 
-      <label htmlFor="integration-provider">
+      <label className="lg-field" htmlFor="integration-provider">
         Provider
         <select
           id="integration-provider"
@@ -68,7 +67,7 @@ function CreateIntegrationForm({ onSubmit, disabled = false }: CreateIntegration
       </label>
 
       {provider === 'instrumented_http' ? (
-        <label htmlFor="integration-environment">
+        <label className="lg-field" htmlFor="integration-environment">
           Environment
           <select
             id="integration-environment"
@@ -86,7 +85,7 @@ function CreateIntegrationForm({ onSubmit, disabled = false }: CreateIntegration
 
       {formError ? <p className="error-text">{formError}</p> : null}
 
-      <button type="submit" disabled={disabled || submitting}>
+      <button type="submit" className="lg-case-button" disabled={disabled || submitting}>
         {submitting ? 'Creating…' : 'Create integration'}
       </button>
     </form>

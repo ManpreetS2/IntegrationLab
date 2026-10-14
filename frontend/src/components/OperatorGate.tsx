@@ -90,7 +90,7 @@ function OperatorGate({ children }: OperatorGateProps) {
   if (state === 'unlocked') return <>{children}</>
 
   return (
-    <main className="auth-shell">
+    <main className="auth-shell ledger-gate">
       <section className="auth-card" aria-live="polite">
         <AppearanceControl />
         <div className="auth-brand">
@@ -100,7 +100,7 @@ function OperatorGate({ children }: OperatorGateProps) {
             <p className="brand-tag">Operator access</p>
           </div>
         </div>
-        <h1 className="page-title">Unlock console</h1>
+        <h1 className="lg-finding">Unlock console</h1>
 
         {state === 'checking' ? (
           <p className="muted">Checking operator access…</p>

@@ -10,7 +10,11 @@ import {
   processWebhookEvent,
   retryWebhookEvent,
 } from '../api'
+import EvidenceTrail from './ledger/EvidenceTrail'
+import LedgerList, { LedgerFilters } from './ledger/LedgerList'
 import { formatStripeAmount } from '../lib/stripeAmount'
+import { formatTime } from '../format'
+import { shorten, webhookFinding } from '../ledger/copy'
 import type {
   Integration,
   WebhookEventDetail,
@@ -23,22 +27,19 @@ interface StripeWebhooksPanelProps {
   integrations: Integration[]
 }
 
-const STATUS_OPTIONS: WebhookProcessingStatus[] = [
-  'pending',
-  'processing',
-  'processed',
-  'retry_scheduled',
-  'failed',
-  'ignored',
-  'dismissed',
+const STATUS_OPTIONS: { id: WebhookProcessingStatus | 'all'; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'pending', label: 'Pending' },
+  { id: 'processing', label: 'Processing' },
+  { id: 'processed', label: 'Processed' },
+  { id: 'retry_scheduled', label: 'Retry scheduled' },
+  { id: 'failed', label: 'Failed' },
+  { id: 'ignored', label: 'Ignored' },
+  { id: 'dismissed', label: 'Dismissed' },
 ]
 
-function formatTime(value: string | null): string {
-  return value ? new Date(value).toLocaleString() : '—'
-}
-
 function statusLabel(status: string): string {
-  return status.replace('_', ' ')
+  return status.replaceAll('_', ' ')
 }
 
 interface WebhookSnapshot {
@@ -65,10 +66,10 @@ function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
     () => integrations.filter((item) => item.provider === 'stripe'),
     [integrations],
   )
-
   const [snapshot, setSnapshot] = useState<WebhookSnapshot | null>(null)
   const [statusFilter, setStatusFilter] = useState<WebhookProcessingStatus | ''>('')
   const [selected, setSelected] = useState<WebhookEventDetail | null>(null)
+  const [pickedId, setPickedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -117,14 +118,12 @@ function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
     void runAction(async () => {
       const counts = await processDueWebhookEvents(25)
       if (selected) setSelected(await getWebhookEvent(selected.id))
-      return (
-        `Processed: ${counts.processed} · Retry scheduled: ${counts.retry_scheduled} · ` +
-        `Failed: ${counts.failed} · Ignored: ${counts.ignored}`
-      )
+      return `Processed ${counts.processed} · retry scheduled ${counts.retry_scheduled} · failed ${counts.failed} · ignored ${counts.ignored}`
     })
   }
 
   function handleSelect(eventId: string) {
+    setPickedId(eventId)
     void runAction(async () => {
       setSelected(await getWebhookEvent(eventId))
       return null
@@ -147,7 +146,7 @@ function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
 
   function handleDismiss(event: WebhookEventSummary) {
     const confirmed = window.confirm(
-      `Dismiss ${event.event_type} (${event.provider_event_id})? It will stop being processed; history is kept.`,
+      `Dismiss ${event.event_type} (${event.provider_event_id})? It will stop being processed. History is kept.`,
     )
     if (!confirmed) return
     void runAction(async () => {
@@ -156,283 +155,193 @@ function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
     })
   }
 
-  const cards: { label: string; value: number | undefined }[] = [
-    { label: 'Received', value: summary?.received },
-    { label: 'Pending', value: summary?.pending },
-    { label: 'Processed', value: summary?.processed },
-    { label: 'Retry scheduled', value: summary?.retry_scheduled },
-    { label: 'Failed', value: summary?.failed },
-  ]
-
-  const canProcessSelected =
-    selected?.processing_status === 'pending' || selected?.processing_status === 'retry_scheduled'
+  const detail = selected?.id === pickedId ? selected : null
+  const summaryRow = events.find((item) => item.id === pickedId) ?? failed.find((item) => item.id === pickedId) ?? null
+  const canProcess = detail?.processing_status === 'pending' || detail?.processing_status === 'retry_scheduled'
+  const canRetry = detail?.processing_status === 'failed'
 
   return (
-    <div className="webhooks">
-      <p className="muted">
-        Stripe deliveries are verified and stored first (quick 2xx), then processed separately with
-        bounded retries. Receiving an event is not the same as processing it successfully.
-      </p>
-
-      {stripeIntegrations.length > 0 ? (
-        <div className="webhook-endpoints">
-          {stripeIntegrations.map((item) => (
-            <p key={item.id} className="muted">
-              {item.name} endpoint: <code>{`${apiOrigin()}/webhooks/stripe/${item.id}`}</code>
-            </p>
-          ))}
-        </div>
-      ) : (
-        <p className="muted">Create a Stripe integration to get a webhook endpoint.</p>
-      )}
-
-      <div className="summary-grid webhook-summary">
-        {cards.map((card) => (
-          <article key={card.label} className="summary-card">
-            <p className="summary-label">{card.label}</p>
-            <p className={card.label === 'Failed' && (card.value ?? 0) > 0 ? 'summary-value is-alert' : 'summary-value'}>
-              {card.value ?? '—'}
-            </p>
-          </article>
-        ))}
-      </div>
-      {summary && summary.duplicate_deliveries > 0 ? (
-        <p className="muted">Duplicate deliveries absorbed: {summary.duplicate_deliveries}</p>
-      ) : null}
-
-      <div className="webhook-toolbar">
-        <label>
-          Status
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as WebhookProcessingStatus | '')}
-          >
-            <option value="">All</option>
-            {STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
-                {statusLabel(status)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" onClick={handleProcessDue} disabled={busy}>
-          {busy ? 'Working…' : 'Process due events'}
-        </button>
-        <button type="button" className="secondary-button" onClick={() => void refresh()} disabled={busy}>
-          Refresh
-        </button>
-      </div>
-
-      {notice ? <p className="success-text">{notice}</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
-
-      {events.length === 0 ? (
-        <p className="empty-state">
-          No webhook events yet. Forward test events with the Stripe CLI (see docs/stripe-webhooks.md).
-        </p>
-      ) : (
-        <div className="table-wrap">
-          <table className="integrations-table">
-            <thead>
-              <tr>
-                <th scope="col">Received</th>
-                <th scope="col">Event type</th>
-                <th scope="col">Object</th>
-                <th scope="col">Delivery count</th>
-                <th scope="col">Status</th>
-                <th scope="col">Attempts</th>
-                <th scope="col">Next attempt</th>
-                <th scope="col">Last error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((event) => (
-                <tr key={event.id}>
-                  <td>
-                    <button type="button" className="linkish-button" onClick={() => handleSelect(event.id)}>
-                      {formatTime(event.first_received_at)}
-                    </button>
-                  </td>
-                  <td>{event.event_type}</td>
-                  <td>{event.provider_object_id ?? '—'}</td>
-                  <td>{event.delivery_count}</td>
-                  <td>
-                    <span className={`webhook-status webhook-status-${event.processing_status}`}>
-                      {statusLabel(event.processing_status)}
-                    </span>
-                  </td>
-                  <td>{event.attempt_count}</td>
-                  <td>{formatTime(event.next_attempt_at)}</td>
-                  <td>{event.last_error_code ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {selected ? (
-        <div className="webhook-detail">
-          <div className="panel-header">
-            <h3>
-              {selected.event_type} <span className="muted">{selected.provider_event_id}</span>
-            </h3>
-            <div className="github-actions">
-              {canProcessSelected ? (
-                <button type="button" onClick={() => handleProcessOne(selected.id)} disabled={busy}>
-                  Process now
-                </button>
-              ) : null}
-              <button type="button" className="secondary-button" onClick={() => setSelected(null)}>
-                Close
-              </button>
-            </div>
-          </div>
-
-          <dl className="result-grid webhook-detail-grid">
-            <div>
-              <dt>Status</dt>
-              <dd>
-                <span className={`webhook-status webhook-status-${selected.processing_status}`}>
-                  {statusLabel(selected.processing_status)}
-                </span>
-              </dd>
-            </div>
-            <div>
-              <dt>Signature</dt>
-              <dd>{selected.signature_verified ? 'Verified' : 'Not verified'}</dd>
-            </div>
-            <div>
-              <dt>Object</dt>
-              <dd>{selected.provider_object_id ?? '—'}</dd>
-            </div>
-            <div>
-              <dt>Amount</dt>
-              <dd>{formatStripeAmount(selected.amount, selected.currency)}</dd>
-            </div>
-            <div>
-              <dt>Mode</dt>
-              <dd>{selected.livemode === null ? '—' : selected.livemode ? 'Live' : 'Test'}</dd>
-            </div>
-            <div>
-              <dt>Duplicate deliveries</dt>
-              <dd>Duplicate deliveries: {selected.delivery_count - 1}</dd>
-            </div>
-            <div>
-              <dt>Retry cycle</dt>
-              <dd>
-                {selected.retry_cycle} (attempt {selected.cycle_attempt_count} of {selected.max_attempts})
-              </dd>
-            </div>
-            <div>
-              <dt>Manual retries</dt>
-              <dd>{selected.manual_retry_count}</dd>
-            </div>
-            <div>
-              <dt>First / last received</dt>
-              <dd>
-                {formatTime(selected.first_received_at)} / {formatTime(selected.last_received_at)}
-              </dd>
-            </div>
-          </dl>
-
-          <h4>Effects</h4>
-          {selected.effects.length === 0 ? (
-            <p className="empty-state">No effect applied.</p>
+    <div className={busy ? 'lg-busy' : undefined} aria-busy={busy || undefined}>
+      <div className="lg-page">
+        <div className="lg-main">
+          <p className="lg-kicker">Webhooks · test mode</p>
+          <h1 className="lg-finding">{webhookFinding(summary)}</h1>
+          <p className="lg-note">
+            Deliveries are verified and stored first, then processed with bounded retries. Receiving an event is not the
+            same as processing it. The failed queue is persistent and is not a count of deliveries in a time window.
+          </p>
+          {stripeIntegrations.length > 0 ? (
+            stripeIntegrations.map((item) => (
+              <p key={item.id} className="lg-mono">
+                {item.name} · {`${apiOrigin()}/webhooks/stripe/${item.id}`}
+              </p>
+            ))
           ) : (
-            <ul className="webhook-effects">
-              {selected.effects.map((effect) => (
-                <li key={effect.id}>
-                  <strong>{effect.effect_type}</strong> — applied once at {formatTime(effect.applied_at)}
-                  {effect.summary ? <span className="muted"> · {effect.summary}</span> : null}
-                </li>
-              ))}
-            </ul>
+            <p className="lg-note">Create a Stripe integration to get a webhook endpoint.</p>
           )}
-
-          <h4>Attempt timeline</h4>
-          {selected.attempts.length === 0 ? (
-            <p className="empty-state">Not attempted yet.</p>
-          ) : (
-            <ol className="webhook-timeline">
-              {selected.attempts.map((attempt) => (
-                <li key={attempt.id} className={`timeline-${attempt.outcome}`}>
-                  <strong>
+          {summary ? (
+            <dl className="lg-metrics">
+              <div>
+                <dt>Received</dt>
+                <dd>{summary.received}</dd>
+              </div>
+              <div>
+                <dt>Pending</dt>
+                <dd>{summary.pending}</dd>
+              </div>
+              <div>
+                <dt>Processed</dt>
+                <dd>{summary.processed}</dd>
+              </div>
+              <div>
+                <dt>Retry scheduled</dt>
+                <dd>{summary.retry_scheduled}</dd>
+              </div>
+              <div>
+                <dt>Failed queue</dt>
+                <dd className={summary.failed > 0 ? 'lg-health-bad' : undefined}>{summary.failed}</dd>
+              </div>
+              <div>
+                <dt>Duplicates absorbed</dt>
+                <dd>{summary.duplicate_deliveries}</dd>
+              </div>
+            </dl>
+          ) : null}
+          <div className="lg-toolbar">
+            <LedgerFilters
+              label="Status"
+              value={statusFilter || 'all'}
+              onChange={(id) => setStatusFilter(id === 'all' ? '' : (id as WebhookProcessingStatus))}
+              options={STATUS_OPTIONS}
+            />
+            <button type="button" className="lg-case-button" onClick={handleProcessDue} disabled={busy}>
+              {busy ? 'Working…' : 'Process due events'}
+            </button>
+          </div>
+          {notice ? <p className="lg-note">{notice}</p> : null}
+          {error ? (
+            <p className="error-text" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {!snapshot ? <p className="lg-empty">Loading webhook events…</p> : null}
+          {snapshot && events.length === 0 ? (
+            <p className="lg-empty">No webhook events match this status.</p>
+          ) : null}
+          {events.length > 0 ? (
+            <LedgerList
+              label="Webhook events"
+              columns={['Received', 'Event', 'Status', 'Attempts']}
+              rows={events.map((event) => ({
+                id: event.id,
+                title: event.event_type,
+                meta: statusLabel(event.processing_status),
+                detail: event.last_error_code ?? event.provider_object_id ?? '—',
+                cells: [
+                  formatTime(event.first_received_at),
+                  <span key="type" className="lg-mono">
+                    {event.event_type}
+                  </span>,
+                  statusLabel(event.processing_status),
+                  String(event.attempt_count),
+                ],
+              }))}
+              selectedId={pickedId}
+              onSelect={handleSelect}
+              emptyText="No webhook events match this status."
+            />
+          ) : null}
+          <p className="lg-section-label">Failed queue</p>
+          <p className="lg-note">These events stay failed until they are retried or dismissed. They are not new deliveries.</p>
+          {snapshot && failed.length === 0 ? <p className="lg-empty">No failed events.</p> : null}
+          {failed.length > 0 ? (
+            <LedgerList
+              label="Failed events"
+              columns={['Failed', 'Event', 'Attempts', 'Last error']}
+              rows={failed.map((event) => ({
+                id: event.id,
+                title: event.event_type,
+                meta: 'Failed',
+                detail: event.last_error_code ?? '—',
+                cells: [
+                  formatTime(event.failed_at),
+                  event.event_type,
+                  String(event.attempt_count),
+                  event.last_error_code ?? '—',
+                ],
+              }))}
+              selectedId={pickedId}
+              onSelect={handleSelect}
+              emptyText="No failed events."
+            />
+          ) : null}
+          {selected && selected.effects.length > 0 ? (
+            <p className="lg-note">
+              Effects applied once: {selected.effects.map((effect) => effect.effect_type).join(', ')}
+            </p>
+          ) : null}
+          {selected && selected.attempts.length > 0 ? (
+            <>
+              <p className="lg-section-label">Attempts</p>
+              <ul className="lg-links">
+                {selected.attempts.map((attempt) => (
+                  <li key={attempt.id}>
                     Attempt {attempt.attempt_number}
-                    {attempt.retry_cycle > 1 ? ` (cycle ${attempt.retry_cycle})` : ''}
-                  </strong>{' '}
-                  {attempt.outcome}
-                  {attempt.manual ? ' · manual' : ''}
-                  {attempt.error_code ? ` · ${attempt.error_code}` : ''}
-                  {attempt.scheduled_delay_seconds !== null
-                    ? ` · retry scheduled in ${attempt.scheduled_delay_seconds}s`
-                    : ''}
-                  <span className="muted"> · {formatTime(attempt.started_at)}</span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-      ) : null}
-
-      <div className="webhook-failed">
-        <h3>Failed events</h3>
-        {failed.length === 0 ? (
-          <p className="empty-state">No failed events.</p>
-        ) : (
-          <div className="table-wrap">
-            <table className="integrations-table">
-              <thead>
-                <tr>
-                  <th scope="col">Failed at</th>
-                  <th scope="col">Event type</th>
-                  <th scope="col">Object</th>
-                  <th scope="col">Attempts</th>
-                  <th scope="col">Last error</th>
-                  <th scope="col">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {failed.map((event) => (
-                  <tr key={event.id}>
-                    <td>
-                      <button type="button" className="linkish-button" onClick={() => handleSelect(event.id)}>
-                        {formatTime(event.failed_at)}
-                      </button>
-                    </td>
-                    <td>{event.event_type}</td>
-                    <td>{event.provider_object_id ?? '—'}</td>
-                    <td>{event.attempt_count}</td>
-                    <td>
-                      {event.last_error_code ?? '—'}
-                      {event.last_error_message ? (
-                        <span className="muted"> · {event.last_error_message}</span>
-                      ) : null}
-                    </td>
-                    <td>
-                      <div className="github-actions">
-                        <button type="button" onClick={() => handleRetry(event.id)} disabled={busy}>
-                          Retry
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          onClick={() => handleDismiss(event)}
-                          disabled={busy}
-                        >
-                          Dismiss
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                    {attempt.retry_cycle > 1 ? ` · cycle ${attempt.retry_cycle}` : ''} · {attempt.outcome}
+                    {attempt.manual ? ' · manual' : ''}
+                    {attempt.error_code ? ` · ${attempt.error_code}` : ''}
+                    <span className="lg-muted"> · {formatTime(attempt.started_at)}</span>
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+              </ul>
+            </>
+          ) : null}
+        </div>
+        <EvidenceTrail
+          title={detail?.event_type ?? summaryRow?.event_type ?? 'Delivery'}
+          stations={eventStations(detail)}
+          action={
+            detail ? (
+              <div className="lg-form-row">
+                {canProcess ? (
+                  <button type="button" className="lg-case-button" disabled={busy} onClick={() => handleProcessOne(detail.id)}>
+                    Process now
+                  </button>
+                ) : null}
+                {canRetry ? (
+                  <button type="button" className="lg-case-button" disabled={busy} onClick={() => handleRetry(detail.id)}>
+                    Retry
+                  </button>
+                ) : null}
+                {canRetry ? (
+                  <button type="button" className="secondary-button" disabled={busy} onClick={() => handleDismiss(detail)}>
+                    Dismiss
+                  </button>
+                ) : null}
+              </div>
+            ) : null
+          }
+        />
       </div>
     </div>
   )
+}
+
+function eventStations(selected: WebhookEventDetail | null) {
+  if (!selected) {
+    return [{ label: 'Event', text: 'Select a delivery or a failed-queue row. Actions apply to the selected event.' }]
+  }
+  const extra = Math.max(0, selected.delivery_count - 1)
+  return [
+    { label: 'Status', text: `${statusLabel(selected.processing_status)} · signature ${selected.signature_verified ? 'verified' : 'not verified'}` },
+    { label: 'Object', text: selected.provider_object_id ?? 'No object id' },
+    { label: 'Amount', text: formatStripeAmount(selected.amount, selected.currency) },
+    {
+      label: 'Delivery',
+      text: extra > 0 ? `${extra} extra ${extra === 1 ? 'delivery' : 'deliveries'} absorbed` : 'One delivery stored',
+    },
+    { label: 'Last error', text: shorten(selected.last_error_message ?? selected.last_error_code ?? 'None recorded', 160) },
+  ]
 }
 
 export default StripeWebhooksPanel

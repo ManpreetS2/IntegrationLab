@@ -18,8 +18,8 @@ function SdkSetup({
 
   return (
     <div className="sdk-setup">
-      <h3>SDK setup</h3>
-      <p className="muted small-text">
+      <p className="lg-section-label">SDK setup</p>
+      <p className="lg-note">
         Install the SDK in the application that makes the HTTP calls. Do not put the ingestion
         credential in this browser, a frontend bundle, or the telemetry ingestion request from here.
       </p>

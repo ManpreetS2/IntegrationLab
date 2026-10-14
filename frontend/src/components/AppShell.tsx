@@ -7,7 +7,17 @@ import { useScrollEdges } from './ledger/useScrollEdges'
 import { AppMark, MenuIcon, NavIcon } from './NavIcons'
 import PageHeader from './PageHeader'
 
-const LEDGER_PAGES = new Set<Page>(['overview', 'telemetry', 'failures'])
+const LEDGER_PAGES = new Set<Page>([
+  'overview',
+  'integrations',
+  'requests',
+  'telemetry',
+  'webhooks',
+  'failures',
+  'diagnostics',
+  'support',
+  'audit',
+])
 
 interface AppShellProps {
   page: Page

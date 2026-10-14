@@ -7,7 +7,6 @@ import {
   rotateIngestionCredential,
 } from '../api'
 import { formatIntegrationStatus, formatTime } from '../format'
-import { pageHref } from '../hooks'
 import type { IngestionCredentialCreated, IngestionCredentialView, Integration } from '../types'
 import { recordsForSelection, type ScopedLoad } from '../viewSelection'
 import CredentialRevealDialog from './CredentialRevealDialog'
@@ -125,13 +124,10 @@ function InstrumentedApps({
 
   if (!selected) {
     return (
-      <section className="panel">
-        <h2>Instrumented applications</h2>
-        <p className="empty-state">
-          Register an application below with provider Instrumented HTTP. Registered means the record
-          exists. It is not an OAuth connection.
-        </p>
-      </section>
+      <p className="lg-empty">
+        Register an application below with provider Instrumented HTTP. Registered means the record exists. It is not an
+        OAuth connection.
+      </p>
     )
   }
 
@@ -140,22 +136,14 @@ function InstrumentedApps({
   const loading = credentials === null
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <div>
-          <h2>Instrumented applications</h2>
-          <p className="muted small-text">
-            These applications report their own HTTP outcomes. Registered and Instrumented are not
-            OAuth Connected.
-          </p>
-        </div>
-        <a className="button-link" href={pageHref('telemetry', { integration: selected.id })}>
-          View SDK observations
-        </a>
-      </div>
-
+    <section>
+      <p className="lg-section-label">Ingestion credentials</p>
+      <p className="lg-note">
+        {selected.name} reports its own HTTP outcomes. Registered and Instrumented are not OAuth Connected. Metadata
+        only — the secret is returned once.
+      </p>
       {integrations.length > 1 ? (
-        <label>
+        <label className="lg-field">
           Application
           <select value={selected.id} onChange={(event) => setSelectedId(event.target.value)}>
             {integrations.map((item) => (
@@ -165,42 +153,29 @@ function InstrumentedApps({
             ))}
           </select>
         </label>
-      ) : (
-        <p>
-          <strong>{selected.name}</strong>{' '}
-          <span className={`status-pill status-${selected.status}`}>
-            {formatIntegrationStatus(selected.status)}
-          </span>
-        </p>
-      )}
-
-      <dl className="fact-grid">
+      ) : null}
+      <dl className="lg-rules">
         <div>
           <dt>Integration ID</dt>
-          <dd className="mono-meta">{selected.id}</dd>
+          <dd className="lg-mono">{selected.id}</dd>
         </div>
         <div>
           <dt>Environment</dt>
           <dd>{selected.environment}</dd>
         </div>
       </dl>
-
-      <h3>Ingestion credentials</h3>
-      <p className="muted small-text">
-        Metadata only. The secret is returned once when you create or rotate a credential.
-      </p>
       {error ? (
         <p className="error-text" role="alert">
           {error}
         </p>
       ) : null}
-      {loading ? <p className="loading-text">Loading credentials…</p> : null}
+      {loading ? <p className="lg-empty">Loading credentials…</p> : null}
       {credentials !== null && credentials.length === 0 && !error ? (
-        <p className="empty-state">No credentials yet. Generate one to move this application to Instrumented.</p>
+        <p className="lg-empty">No credentials yet. Generate one to move this application to Instrumented.</p>
       ) : null}
       {credentials !== null && credentials.length > 0 ? (
-        <div className="table-wrap">
-          <table className="integrations-table">
+        <div className="lg-scroll-table">
+          <table className="lg-table">
             <thead>
               <tr>
                 <th>Label</th>
@@ -253,13 +228,13 @@ function InstrumentedApps({
       ) : null}
 
       <form
-        className="webhook-toolbar"
+        className="lg-form-row"
         onSubmit={(event) => {
           event.preventDefault()
           void createCredential()
         }}
       >
-        <label>
+        <label className="lg-field">
           Label
           <input
             value={label}
@@ -269,12 +244,12 @@ function InstrumentedApps({
             disabled={busy}
           />
         </label>
-        <button type="submit" disabled={busy || active.length >= 5}>
+        <button type="submit" className="lg-case-button" disabled={busy || active.length >= 5}>
           {busy ? 'Working…' : 'Generate credential'}
         </button>
       </form>
       {active.length >= 5 ? (
-        <p className="muted small-text">Five active credentials is the limit. Rotate or revoke one first.</p>
+        <p className="lg-note">Five active credentials is the limit. Rotate or revoke one first.</p>
       ) : null}
 
       <SdkSetup integrationId={selected.id} environment={selected.environment} />

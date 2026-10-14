@@ -1,6 +1,7 @@
-/* Ledger v2, scoped to Overview, Telemetry, and Failure Investigation. */
+/* Ledger v2. Every console route uses this system. */
 
-.app-frame.ledger {
+.app-frame.ledger,
+.ledger-gate {
   --lg-bg: #efebe3;
   --lg-canvas: #f7f4ee;
   --lg-pane: #e9e3d6;
@@ -43,7 +44,8 @@
   color: var(--lg-ink);
 }
 
-html[data-theme='dark'] .app-frame.ledger {
+html[data-theme='dark'] .app-frame.ledger,
+html[data-theme='dark'] .ledger-gate {
   --lg-bg: #100e0c;
   --lg-canvas: #171512;
   --lg-pane: #221f1a;
@@ -60,11 +62,14 @@ html[data-theme='dark'] .app-frame.ledger {
   --color-accent-ink: #171512;
 }
 
-html:has(.app-frame.ledger) {
+html:has(.app-frame.ledger),
+html:has(.ledger-gate) {
   background: #efebe3;
+  overflow-x: clip;
 }
 
-html[data-theme='dark']:has(.app-frame.ledger) {
+html[data-theme='dark']:has(.app-frame.ledger),
+html[data-theme='dark']:has(.ledger-gate) {
   background: #100e0c;
 }
 
@@ -116,9 +121,14 @@ html[data-theme='dark']:has(.app-frame.ledger) {
 }
 
 .app-frame.ledger button,
+.app-frame.ledger a.button-link,
 .app-frame.ledger input,
 .app-frame.ledger select,
-.app-frame.ledger textarea {
+.app-frame.ledger textarea,
+.ledger-gate button,
+.ledger-gate input,
+.ledger-gate select,
+.ledger-gate textarea {
   border-radius: 4px;
 }
 
@@ -127,21 +137,33 @@ html[data-theme='dark']:has(.app-frame.ledger) {
   text-underline-offset: 3px;
 }
 
-.app-frame.ledger .appearance {
+.app-frame.ledger a.button-link,
+.app-frame.ledger a.button-link:hover {
+  background: var(--lg-ink);
+  color: var(--color-accent-ink);
+  text-decoration: none;
+}
+
+.app-frame.ledger .appearance,
+.ledger-gate .appearance {
   background: transparent;
   border: 1px solid var(--lg-rule);
   border-radius: 4px;
   padding: 0;
 }
 
-.app-frame.ledger .appearance-option {
+.app-frame.ledger .appearance-option,
+.ledger-gate .appearance-option {
   border-radius: 0;
   box-shadow: none;
 }
 
 .app-frame.ledger .appearance-option.is-selected,
 .app-frame.ledger .appearance-option.is-selected:hover:not(:disabled),
-html[data-theme='dark'] .app-frame.ledger .appearance-option.is-selected {
+html[data-theme='dark'] .app-frame.ledger .appearance-option.is-selected,
+.ledger-gate .appearance-option.is-selected,
+.ledger-gate .appearance-option.is-selected:hover:not(:disabled),
+html[data-theme='dark'] .ledger-gate .appearance-option.is-selected {
   background: var(--lg-ink);
   color: var(--lg-canvas);
   box-shadow: none;
@@ -345,7 +367,8 @@ html[data-theme='dark'] .app-frame.ledger .appearance-option.is-selected {
   box-shadow: inset 0 0 0 1.5px var(--lg-muted);
 }
 
-.lg-table-wrap {
+.lg-table-wrap,
+.lg-scroll-table {
   overflow-x: auto;
   max-width: 100%;
 }
@@ -412,6 +435,7 @@ html[data-theme='dark'] .app-frame.ledger .appearance-option.is-selected {
 .lg-mono {
   font-family: var(--font-mono);
   font-size: 0.84em;
+  overflow-wrap: anywhere;
 }
 
 .lg-section-label {
@@ -606,6 +630,7 @@ html[data-theme='dark'] .app-frame.ledger .appearance-option.is-selected {
   font-size: 1.55rem;
   font-weight: 500;
   letter-spacing: -0.02em;
+  overflow-wrap: break-word;
 }
 
 .lg-station {
@@ -789,6 +814,7 @@ html[data-theme='dark'] .lg-drawer-backdrop {
 
   .app-frame.ledger .topbar-meta {
     flex: 1 1 100%;
+    flex-wrap: wrap;
     width: 100%;
     margin: 0;
     justify-content: flex-start;
@@ -869,5 +895,109 @@ html[data-theme='dark'] .lg-drawer-backdrop {
 @media (prefers-reduced-motion: reduce) {
   .lg-seq-scroller {
     scroll-behavior: auto;
+  }
+}
+
+.ledger-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px 16px;
+}
+
+.ledger-gate .auth-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ledger-gate .page-title {
+  font-family: 'Iowan Old Style', 'New York', Palatino, 'Palatino Linotype', serif;
+  font-size: clamp(2rem, 6vw, 2.6rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.ledger-gate .muted,
+.ledger-gate .error-text {
+  color: var(--lg-muted);
+}
+
+.ledger-gate .error-text {
+  color: var(--lg-red);
+}
+
+.app-frame.ledger .panel,
+.app-frame.ledger .summary-card,
+.app-frame.ledger .github-card,
+.app-frame.ledger .webhook-detail,
+.app-frame.ledger .webhook-failed,
+.app-frame.ledger .failure-observed,
+.app-frame.ledger .failure-diagnosis,
+.app-frame.ledger .failure-result,
+.app-frame.ledger .banner,
+.app-frame.ledger .section-error {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-frame.ledger .banner,
+.app-frame.ledger .section-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--lg-rule);
+}
+
+.app-frame.ledger .sdk-setup pre,
+.app-frame.ledger .secret-dialog {
+  border: 1px solid var(--lg-rule);
+  border-radius: 4px;
+  background: var(--lg-canvas);
+  color: var(--lg-ink);
+  box-shadow: none;
+}
+
+.app-frame.ledger .sdk-setup pre {
+  overflow: auto;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+}
+
+.lg-form {
+  display: grid;
+  gap: 12px;
+  max-width: 36rem;
+}
+
+.lg-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.lg-split {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .lg-split {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

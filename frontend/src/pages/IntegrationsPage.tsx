@@ -1,12 +1,15 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { apiOrigin, getReliabilityOverview } from '../api'
 import CreateIntegrationForm from '../components/CreateIntegrationForm'
-import InstrumentedApps from '../components/InstrumentedApps'
+import EvidenceTrail from '../components/ledger/EvidenceTrail'
 import GitHubConnectionPanel from '../components/GitHubConnectionPanel'
-import IntegrationsTable from '../components/IntegrationsTable'
+import InstrumentedApps from '../components/InstrumentedApps'
+import LedgerList from '../components/ledger/LedgerList'
 import SectionStatus from '../components/SectionStatus'
-import SummaryCards from '../components/SummaryCards'
-import { useResource, type Resource } from '../hooks'
+import { formatIntegrationStatus, formatProvider } from '../format'
+import { pageHref, useResource, type Resource } from '../hooks'
+import { integrationFinding } from '../ledger/copy'
+import type { TrailStation } from '../ledger/trail'
 import type { Environment, Integration, IntegrationProvider } from '../types'
 
 interface IntegrationsPageProps {
@@ -18,11 +21,14 @@ function loadOverview() {
   return getReliabilityOverview(24)
 }
 
+function connectionStatus(item: Integration): string {
+  if (item.provider === 'stripe') return 'Webhook endpoint'
+  return formatIntegrationStatus(item.status)
+}
+
 function IntegrationsPage({ integrations, onCreate }: IntegrationsPageProps) {
   const items = useMemo(() => integrations.data ?? [], [integrations.data])
-  const github = items.filter((item) => item.provider === 'github')
-  const stripe = items.filter((item) => item.provider === 'stripe')
-  const instrumented = items.filter((item) => item.provider === 'instrumented_http')
+  const [pickedId, setPickedId] = useState<string | null>(null)
   const overview = useResource(loadOverview)
   const verification = useMemo(() => {
     const map = new Map<string, boolean>()
@@ -32,14 +38,42 @@ function IntegrationsPage({ integrations, onCreate }: IntegrationsPageProps) {
     return map
   }, [overview.data])
 
+  const selected =
+    items.find((item) => item.id === pickedId) ??
+    items.find((item) => item.status === 'not_connected' || item.status === 'needs_setup' || item.status === 'registered') ??
+    items[0] ??
+    null
+
   function verificationText(id: string): string {
     const configured = verification.get(id)
     if (configured === undefined) return overview.error ? 'Unavailable' : 'Checking…'
     return configured ? 'Configured' : 'Not configured'
   }
 
+  const stations: TrailStation[] = selected
+    ? [
+        { label: 'Provider', text: formatProvider(selected.provider) },
+        { label: 'Status', text: connectionStatus(selected) },
+        { label: 'Environment', text: selected.environment },
+        ...(selected.provider === 'stripe'
+          ? [{ label: 'Verification', text: verificationText(selected.id) }]
+          : []),
+        ...(selected.provider === 'instrumented_http'
+          ? [{ label: 'Credential', text: 'The secret is shown once. This page keeps only the prefix.' }]
+          : []),
+      ].slice(0, 5)
+    : [{ label: 'Register', text: 'Create a GitHub, Stripe, or instrumented HTTP record.' }]
+
+  const actionHref = selected
+    ? selected.provider === 'instrumented_http'
+      ? pageHref('telemetry', { integration: selected.id })
+      : selected.provider === 'stripe'
+        ? pageHref('webhooks')
+        : pageHref('diagnostics', { integration: selected.id })
+    : null
+
   return (
-    <>
+    <div className={integrations.loading ? 'lg-busy' : undefined} aria-busy={integrations.loading || undefined}>
       <SectionStatus
         loading={integrations.loading}
         error={integrations.error}
@@ -47,71 +81,77 @@ function IntegrationsPage({ integrations, onCreate }: IntegrationsPageProps) {
         onRetry={integrations.reload}
         loadingText="Loading integrations…"
       />
-
       {integrations.data ? (
-        <>
-          <SummaryCards integrations={items} />
-          <section className="panel">
-            <div className="panel-header">
-              <div>
-                <h2>Configured integrations</h2>
-                <p className="muted small-text">Provider identity and connection state for this operator console.</p>
-              </div>
-              <button type="button" className="secondary-button" onClick={integrations.reload}>
-                Refresh
-              </button>
-            </div>
-            <IntegrationsTable integrations={items} />
-          </section>
-
-          {github.length > 0 ? (
-            <section className="panel">
-              <h2>GitHub connections</h2>
-              <p className="muted">
-                Connect a GitHub OAuth App with read:user scope. Tokens never reach the browser.
-              </p>
-              <div className="github-list">
-                {github.map((integration) => (
-                  <article key={integration.id} className="github-card">
-                    <h3>{integration.name}</h3>
-                    <GitHubConnectionPanel integration={integration} onStatusChange={integrations.reload} />
-                  </article>
-                ))}
-              </div>
+        <div className="lg-page">
+          <div className="lg-main">
+            <p className="lg-kicker">Integrations</p>
+            <h1 className="lg-finding">{integrationFinding(items)}</h1>
+            <p className="lg-note">
+              {items.length} registered. GitHub uses OAuth. Stripe uses a webhook endpoint. Instrumented applications
+              report their own HTTP calls.
+            </p>
+            <LedgerList
+              label="Integrations"
+              columns={['Integration', 'Provider', 'Status', 'Environment']}
+              rows={items.map((item) => ({
+                id: item.id,
+                title: item.name,
+                meta: formatProvider(item.provider),
+                detail: `${connectionStatus(item)} · ${item.environment}`,
+                cells: [
+                  <strong key="name">{item.name}</strong>,
+                  formatProvider(item.provider),
+                  connectionStatus(item),
+                  item.environment,
+                ],
+              }))}
+              selectedId={selected?.id ?? null}
+              onSelect={setPickedId}
+              emptyText="No integrations yet. Register one below."
+            />
+            {selected?.provider === 'github' ? (
+              <section>
+                <p className="lg-section-label">GitHub connection</p>
+                <GitHubConnectionPanel integration={selected} onStatusChange={integrations.reload} />
+              </section>
+            ) : null}
+            {selected?.provider === 'stripe' ? (
+              <section>
+                <p className="lg-section-label">Webhook endpoint</p>
+                <p className="lg-note">
+                  Point Stripe, or <span className="lg-mono">stripe listen --forward-to</span>, at this URL. The signing
+                  secret stays in the backend environment.
+                </p>
+                <p className="lg-mono">{`${apiOrigin()}/webhooks/stripe/${selected.id}`}</p>
+                <p className="lg-note">Verification: {verificationText(selected.id)}</p>
+              </section>
+            ) : null}
+            {selected?.provider === 'instrumented_http' ? (
+              <InstrumentedApps integrations={[selected]} onChanged={integrations.reload} />
+            ) : null}
+            <section>
+              <p className="lg-section-label">Register</p>
+              <CreateIntegrationForm onSubmit={onCreate} disabled={integrations.loading && !integrations.data} />
             </section>
-          ) : null}
-
-          <InstrumentedApps integrations={instrumented} onChanged={integrations.reload} />
-
-          {stripe.length > 0 ? (
-            <section className="panel">
-              <h2>Stripe webhook endpoints</h2>
-              <p className="muted">
-                Point Stripe (or <code>stripe listen --forward-to</code>) at these URLs. The signing
-                secret lives only in the backend environment and is never shown here.
-              </p>
-              <div className="github-list">
-                {stripe.map((integration) => (
-                  <article key={integration.id} className="github-card">
-                    <h3>{integration.name}</h3>
-                    <p className="webhook-endpoints">
-                      Endpoint: <code>{`${apiOrigin()}/webhooks/stripe/${integration.id}`}</code>
-                    </p>
-                    <p>
-                      Webhook verification: <strong>{verificationText(integration.id)}</strong>
-                    </p>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ) : null}
-        </>
+          </div>
+          <EvidenceTrail
+            title={selected?.name ?? 'Registration'}
+            stations={stations}
+            action={
+              actionHref ? (
+                <a className="button-link" href={actionHref}>
+                  {selected?.provider === 'instrumented_http'
+                    ? 'Open telemetry'
+                    : selected?.provider === 'stripe'
+                      ? 'Open webhooks'
+                      : 'Open diagnostics'}
+                </a>
+              ) : null
+            }
+          />
+        </div>
       ) : null}
-
-      <section className="panel">
-        <CreateIntegrationForm onSubmit={onCreate} disabled={integrations.loading && !integrations.data} />
-      </section>
-    </>
+    </div>
   )
 }
 
