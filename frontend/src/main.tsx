@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import OperatorGate from './components/OperatorGate.tsx'
 import './index.css'
+import './ledger/ledger.css'
 
 const DesignPreview = import.meta.env.DEV
   ? lazy(() => import('./design-preview/DesignPreview.tsx'))

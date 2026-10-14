@@ -3,8 +3,11 @@ import type { ReactNode } from 'react'
 import { API_URL } from '../api'
 import { NAV_GROUPS, PAGE_META, pageHref, type Page } from '../hooks'
 import AppearanceControl from './AppearanceControl'
+import { useScrollEdges } from './ledger/useScrollEdges'
 import { AppMark, MenuIcon, NavIcon } from './NavIcons'
 import PageHeader from './PageHeader'
+
+const LEDGER_PAGES = new Set<Page>(['overview', 'telemetry', 'failures'])
 
 interface AppShellProps {
   page: Page
@@ -14,9 +17,12 @@ interface AppShellProps {
 
 function AppShell({ page, connectivity, children }: AppShellProps) {
   const [navOpen, setNavOpen] = useState(false)
+  const [mobileNav, setMobileNav] = useState<HTMLElement | null>(null)
   const drawerId = useId()
   const closeBtnRef = useRef<HTMLButtonElement>(null)
   const meta = PAGE_META[page]
+  const ledger = LEDGER_PAGES.has(page)
+  const navEdges = useScrollEdges(mobileNav, page)
 
   useEffect(() => {
     if (!navOpen) return
@@ -80,7 +86,7 @@ function AppShell({ page, connectivity, children }: AppShellProps) {
   )
 
   return (
-    <div className="app-frame">
+    <div className={ledger ? 'app-frame ledger' : 'app-frame'}>
       <aside className="app-sidebar" aria-label="Primary">
         {nav}
       </aside>
@@ -119,6 +125,26 @@ function AppShell({ page, connectivity, children }: AppShellProps) {
 
       <div className="app-column">
         <header className="app-topbar">
+          {ledger ? (
+            <div className={`lg-mobile-nav-wrap${navEdges.right ? ' can-right' : ''}`}>
+              <nav
+                ref={setMobileNav}
+                className={`lg-mobile-nav${navEdges.left ? ' can-left' : ''}${navEdges.right ? ' can-right' : ''}`}
+                aria-label="Sections"
+              >
+                {NAV_GROUPS.flatMap((group) => group.pages).map((id) => (
+                  <a key={id} href={pageHref(id)} aria-current={page === id ? 'page' : undefined}>
+                    {PAGE_META[id].label}
+                  </a>
+                ))}
+              </nav>
+              {navEdges.right ? (
+                <span className="lg-scroll-cue" aria-hidden="true">
+                  ›
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           <button
             type="button"
             className="icon-button menu-toggle"

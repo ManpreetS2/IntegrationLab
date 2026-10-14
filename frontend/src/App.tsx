@@ -98,7 +98,11 @@ function App() {
       ) : null}
       {route.page === 'requests' ? <RequestsPage integrations={items} /> : null}
       {route.page === 'telemetry' ? (
-        <TelemetryPage integrations={items} requestedIntegrationId={route.params.get('integration')} />
+        <TelemetryPage
+          integrations={items}
+          integrationsLoaded={Boolean(integrations.data)}
+          requestedIntegrationId={route.params.get('integration')}
+        />
       ) : null}
       {route.page === 'webhooks' ? (
         <section className="panel">
