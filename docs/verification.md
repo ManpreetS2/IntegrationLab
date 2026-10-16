@@ -58,31 +58,67 @@ Failure Lab rows remain explicitly `is_simulated=true`. The demo script does
 **not** forge signed Stripe deliveries and does not claim a real GitHub OAuth
 connection.
 
-## External / provider acceptance matrix
+## CURRENT AUTOMATED (2026-10-15 · SHA `954ed09`)
 
-Update rows only after the matching step in
-[external-acceptance.md](external-acceptance.md) succeeds.
+| Gate | Result | Evidence |
+|---|---|---|
+| Backend pytest | PASS (367) | `backend/` suite |
+| Frontend lint / unit / build | PASS (30 unit) | `frontend/` |
+| SDK unit tests | PASS (Python 10, Node 10) | `sdk/` |
+| CI on main | PASS | Actions run on `954ed09` |
+| Migrations | PASS | head `007_universal_telemetry` |
+| Terraform | PASS in CI; local validate may time out on provider plugin | `infra/terraform` |
 
-| Claim | Status |
+## CURRENT MANUAL LOCAL
+
+| Claim | Result | Evidence |
+|---|---|---|
+| Compose Ledger UI pages | PASS | Overview→Audit light/dark |
+| Operator auth / nginx `/auth/operator` | PASS | 401 unauth; JSON probe |
+| Failure Lab + simulation isolation | PASS | `unauthorized_401` |
+| Support case + audit | PASS | `CASE-00010` |
+| DB outage recovery | PASS | API 503 → restore |
+| Stripe invalid signature | PASS | HTTP 400 |
+| Stripe retry / failed queue / manual retry / one effect | PASS | See `verification-current.md` |
+| Python + Node SDK lifecycle | PASS | Rotate/revoke |
+
+## CURRENT EXTERNAL GITHUB
+
+| Claim | Result |
 |---|---|
-| GitHub OAuth authorize/callback + PKCE + encrypted token | **Externally verified** (Compose `:8080`, OAuth App `IntegrationLab Local`) |
-| Real GitHub `GET /user` provider request (`is_simulated=false`) | **Externally verified** |
-| GitHub OAuth deny/cancel or revocation negative path | **Externally verified** — cancel callback (`status=cancelled`, no credential leak) + revoke → `github_unauthorized` / diagnostics auth fail → reconnect |
-| Stripe CLI signed webhook → durable receipt | **Externally verified** (`stripe listen` → HTTP 200, `signature_verified=true`) |
-| Stripe process + effect + process intent audit | **Externally verified** (`payment_success_recorded` + `webhook_process_*` audit) |
-| Stripe duplicate delivery (`delivery_count` + one effect) | **Externally verified** (`delivery_count=2`, one effect; `duplicate_deliveries=1`) |
-| Stripe failed queue + failure classification | **Externally verified** — signed invalid `data.object` → `webhook_invalid_event_data` → failed queue (permanent / non-retryable) |
-| Stripe manual retry / dismiss of failed events | Implemented · CI verified · **not Externally verified** (external run used a permanent failure; manual retry was not exercised) |
-| Support case from real provider evidence | **Externally verified** — `CASE-00001` with pinned real request + diagnostics + audit |
-| Local Compose full stack boot | **Locally verified** |
-| Terraform AWS topology | Implemented · CI `fmt`/`validate` · **not Externally verified** (no apply) |
-| CloudFront → ALB → ECS → RDS runtime | Implemented · **not Externally verified** |
+| Connect redirect + state + PKCE S256 | PASS (local handoff) |
+| Interactive authorize / callback / `/user` / diagnostics / revoke recovery | **BLOCKED** — needs operator consent in browser |
 
-## Still requires user-controlled external systems
+Details: `docs/verification-current.md`, `docs/external-acceptance.md`.
 
-- Optional later: `terraform apply` + CloudFront runtime (cost approval)
+## CURRENT EXTERNAL STRIPE TEST MODE
 
-GitHub OAuth App credentials, Stripe CLI login, and Compose boot were completed for the portfolio acceptance run documented above.
+| Claim | Result |
+|---|---|
+| Stripe CLI listen + signed delivery | **PASS** |
+| `payment_intent.succeeded` / `payment_failed` / `charge.refunded` | **PASS** |
+| Same-event redelivery idempotency | **PASS** (`stripe events resend`) |
+
+## CURRENT SDK PYTHON / NODE
+
+Both **PASS** against Compose (see `verification-current.md`).
+
+## CURRENT FAILURE RECOVERY
+
+Stripe processing recovery **PASS**. GitHub credential recovery **BLOCKED**. SDK credential recovery **PASS**.
+
+## HISTORICAL EXTERNAL
+
+Older GitHub OAuth / Stripe sessions and v2 UI recordings may exist under `docs/assets/` and prior verification notes. They do **not** automatically prove the current Ledger UI path. Label them **Historical**.
+
+## AWS ARCHITECTURE ONLY
+
+Terraform fmt/validate (CI). **ARCHITECTURE VALIDATED — NOT APPLIED.** Do not claim hosted on AWS.
+
+## Still requires user-controlled steps
+
+- Interactive GitHub OAuth authorize (and optional revoke/reconnect demo)
+- Optional later: `terraform apply` + runtime smoke (explicit cost approval)
 
 ## Rule for portfolio claims
 

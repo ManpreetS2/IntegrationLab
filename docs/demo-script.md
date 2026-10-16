@@ -1,56 +1,78 @@
-# Demo Script
+# Demo script — IntegrationLab (Ledger UI v3)
 
 Audience: internship / Solutions Engineer interview.
 
-Prefer the **Externally verified** Compose story below when the local stack has
-real GitHub + Stripe evidence. Use `make demo` only when you need a deterministic
-SIMULATED dataset — and say so out loud.
+Prefer **current external Stripe + local SDK/recovery** evidence. Say **BLOCKED** out loud if GitHub interactive OAuth is not completed. Always label **SIMULATED** Failure Lab rows.
 
-Always say when evidence is **SIMULATED**.
+Screenshots: `docs/assets/final/`. Evidence: `docs/portfolio-evidence.md`.
 
 ---
 
-## 60-second recruiter demo
+## 2-minute backup
 
-1. **Problem (10s)** — “Partner integrations fail in ambiguous ways. Logs alone don’t give operators a recovery workflow.”
-2. **Overview (10s)** — `/#/overview`: health from stored evidence only; unknown ≠ healthy.
-3. **Evidence (15s)** — Requests (real GitHub `/user`) or Webhooks (signed Stripe receipt, duplicate absorbed, failed queue).
-4. **Support case (15s)** — `CASE-00001` → pinned real evidence → note → status → timeline + correlation short-id.
-5. **Close (10s)** — “FastAPI, React, Postgres, Docker, CI, Terraform for AWS — with an honest verification matrix.”
+1. Problem (15s) — Ambiguous partner failures; mixed evidence misleads operators.  
+2. Overview (20s) — Health from stored evidence; unknown ≠ healthy; Stripe degraded from failed queue.  
+3. Stripe (40s) — Webhooks: signed receipt, duplicate absorbed, failed queue → manual retry story.  
+4. Telemetry (25s) — SDK-reported, not verified; credential rotate/revoke.  
+5. Close (20s) — FastAPI/React/Postgres/CI; AWS Terraform validated not applied; GitHub OAuth design ready, interactive grant optional live.
 
 ---
 
-## 5-minute engineering walkthrough
+## 5–7 minute engineering walkthrough
 
-### 1. Overview (30s)
+### 1. Problem (30s)
 
-`/#/overview` — health totals, Database indicator, no surprise provider calls.
+Third-party integrations fail ambiguously. Operators need provenance: provider vs webhook vs simulation vs SDK report.
 
-### 2. GitHub path (60s)
+### 2. Overview (40s)
 
-- **GitHub Acceptance** connected as a real OAuth App (`read:user`).
-- Connection status ≠ reliability health (degraded can mean recent 401s after revoke drills).
-- Diagnostics: pass checklist + real `GET /user`.
-- Negative path: revoke → `github_unauthorized` (not “GitHub down”) → reconnect.
+`/#/overview` — attention counts, Database reachable, Stripe/SDK degraded cards. Simulations never alter live health.
 
-### 3. Stripe webhook reliability (90s)
+### 3. Evidence sources (30s)
 
-- `stripe listen` → signature verified → durable receipt → HTTP 200.
-- Process → attempts append-only; `payment_success_recorded` once.
-- Duplicate delivery: `delivery_count`↑, still one effect.
-- Failed queue: invalid `data.object` → `webhook_invalid_event_data` (permanent / non-retryable classification).
-- Manual retry exists in product/CI; do not claim it was externally demonstrated unless you re-run that step.
-- Intent audit **before** process.
+Say the four classes. Point at Requests / Webhooks / Failures (include simulations) / Telemetry copy.
 
-### 4. Support operations (60s)
+### 4. GitHub OAuth (45–60s)
 
-- Case from real provider request + diagnostics + audit evidence.
-- Timeline mixes `occurred_at` vs `pinned_at`; correlation short-ids.
+Show Connect GitHub → leaves for GitHub authorize (state + PKCE).  
+If not authorized this session: “Design and automated tests are green; interactive consent is the remaining gate.”  
+Do not fake a connected profile.
 
-### 5. AWS architecture (30s)
+### 5. Failure Lab (40s)
 
-- CloudFront → S3 + ALB → ECS/Fargate → private RDS; OIDC deploy; no apply claimed.
+Run `unauthorized_401`. Show diagnosis + simulated badge. Toggle include simulations on Failures.
 
-### 6. Close (30s)
+### 6. Stripe delivery / idempotency (60s)
 
-- Honest limits: AWS not applied; background webhook worker still operator-triggered.
+Webhooks page: recent `evt_3…` processed effects. Mention CLI acceptance and `stripe events resend` → `delivery_count=2`, one effect.
+
+### 7. Failure / recovery (75s)
+
+Tell Demo B: delivery 2xx → processing fault → 1s/2s/4s → failed queue → manual retry → one effect. Contrast invalid signature 400.
+
+### 8. SDK telemetry (45s)
+
+Telemetry page: `independently_verified: no`. Credential generate/rotate/revoke narrative.
+
+### 9. Diagnostics (30s)
+
+Open diagnostics for Stripe/GitHub cards; explain operator-triggered probes.
+
+### 10. Support case / audit (45s)
+
+Open Support Cases + Audit: note, status, pinned Failure Lab evidence; SDK cannot be pinned.
+
+### 11. Architecture / tradeoffs (40s)
+
+Compose local; six-job CI; Terraform AWS not applied; no always-on webhook worker; single-operator.
+
+### 12. Close (20s)
+
+Offer deep-dive: idempotency, OAuth threat model, or evidence honesty.
+
+---
+
+## Recording script (90–150s) if video capability available
+
+0–10 Overview · 10–25 real vs simulated · 25–40 SDK telemetry · 40–55 Failure Lab · 55–80 Stripe recovery · 80–100 GitHub design/handoff · 100–115 Support/audit · 115–130 architecture.  
+If external GitHub not filmed, say so on screen or voiceover.
