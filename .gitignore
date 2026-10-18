@@ -79,3 +79,4 @@ override.tf.json
 scripts/aws/.secrets/
 *.pem
 .cursor/
+.tools/

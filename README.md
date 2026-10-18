@@ -8,9 +8,9 @@ This is a local portfolio application. It is not a hosted monitoring service, an
 
 [![IntegrationLab CI](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml)
 
-![IntegrationLab Ledger UI v3 — light overview](design/stage2/overview-light-desktop.png)
+![IntegrationLab Ledger UI v3 — light overview](docs/assets/final/overview-light.png)
 
-*Current local console on `main`: Ledger UI v3, light appearance. Health comes from stored evidence; absent observations are not silently shown as healthy.*
+*Current local console: Ledger UI v3. Health comes from stored evidence; absent observations are not silently shown as healthy.*
 
 [![Watch the archived IntegrationLab v2 demo](docs/media/integrationlab-v2-thumbnail.png)](docs/media/integrationlab-v2-demo.mp4)
 
@@ -43,9 +43,9 @@ The current interface uses **Ledger**, a restrained, evidence-first design acros
 
 The Ledger redesign uses the existing v2 API contracts and backend health calculations. It does **not** add hosted monitoring, automatic webhook workers, tenant isolation, or upstream verification.
 
-![Ledger v3 — dark telemetry](design/stage2/telemetry-dark-desktop.png)
+![Ledger v3 — GitHub diagnostics](docs/assets/final/github-diagnostics.png)
 
-![Ledger v3 — webhook investigation](design/stage2/webhooks-light-desktop.png)
+![Ledger v3 — Stripe failed-queue recovery](docs/assets/final/stripe-failed-recovery.png)
 
 ## Universal Monitoring v2
 
@@ -64,7 +64,7 @@ The console shows those rows on **Telemetry**, not on the provider request log.
 
 Switching the selected application hides the previous application's credential prefixes and telemetry until the new response arrives.
 
-![SDK-reported telemetry in Ledger v3 light appearance](design/stage2/telemetry-light-desktop.png)
+![SDK-reported telemetry in Ledger v3](docs/assets/final/telemetry.png)
 
 ## GitHub and Stripe
 
@@ -74,17 +74,11 @@ Stripe uses one webhook signing secret for the process. The console shows the lo
 
 Failure Lab, guided diagnostics, GitHub OAuth, and the Stripe webhook receiver are unavailable for instrumented applications. The UI disables those actions instead of pretending they apply.
 
-![Stripe webhook investigation in Ledger v3](design/stage2/webhooks-dark-desktop.png)
-
 ## Light and dark
 
 Ledger UI v3 has warm paper-and-ink light and warm near-black dark appearances. Choose **System**, **Light**, or **Dark** in the console. System follows the operating system, including later changes. The choice is stored in this browser.
 
-![Ledger v3 — dark overview](design/stage2/overview-dark-desktop.png)
-
-![Ledger v3 — telemetry on a phone, light](design/stage2/telemetry-light-mobile.png)
-
-![Ledger v3 — telemetry on a phone, dark](design/stage2/telemetry-dark-mobile.png)
+![Ledger v3 — dark overview](docs/assets/final/overview-dark.png)
 
 ## Architecture
 
@@ -205,6 +199,31 @@ Use the same environment variables as the Python SDK. `fromEnv()` rejects an ope
 
 A shot list for a 60–90 second recording is in [docs/v2-demo-script.md](docs/v2-demo-script.md).
 
+## Verification
+
+Do not mix these evidence classes. Details: [portfolio-evidence.md](docs/portfolio-evidence.md), [verification-current.md](docs/verification-current.md), [external-acceptance.md](docs/external-acceptance.md).
+
+### Automated
+
+Backend pytest (367), frontend lint + unit (30) + production build, Python/Node SDK unit tests, six-job GitHub Actions on `main` (backend, frontend quality, both containers, Compose smoke, Terraform validate).
+
+### Current external acceptance
+
+- **GitHub OAuth (2026-10-17):** interactive authorize/callback against github.com **PASS**; connected identity; real `GET /user`; diagnostics pass; encrypted token survived backend restart; revoke → real HTTP 401 → reconnect → healthy (**PASS**). Details: [external-acceptance.md](docs/external-acceptance.md), [verification-current.md](docs/verification-current.md).
+- **Stripe test mode:** Stripe CLI sandbox listen on an earlier environment accepted signed events (`payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`) with same-event redelivery keeping one effect. The 2026-10-17 laptop re-verified locally signed deliveries and processing recovery; it did **not** repeat Stripe CLI.
+
+### Local client acceptance
+
+Python and Node SDKs: ingest sanitized observations; rotate/revoke credentials; secrets never appear in telemetry list responses.
+
+### Architecture-only
+
+AWS Terraform is formatted/validated in CI. **Not applied.** Do not say the product is hosted on AWS.
+
+### Historical
+
+Older v2 provider verification and videos remain labeled historical. They do not automatically prove the current Ledger UI path.
+
 ## Tests and CI
 
 From a checkout with the backend virtualenv and frontend dependencies:
@@ -221,9 +240,7 @@ Pytest and the acceptance script use a database whose name ends in `_test`. They
 
 GitHub Actions runs six jobs: backend tests, frontend quality, backend image, frontend image, Compose smoke, and Terraform validate. The smoke job builds its own stack and deletes that stack's volume when it finishes.
 
-For Ledger UI v3, isolated browser/API checks covered one-time credential reveal, rotation and revocation, webhook retry and dismiss, support-case creation, notes and status changes, unauthorized operator actions, and narrow-screen presentation. **GitHub OAuth was not completed in that UI v3 browser review** because the isolated environment lacked GitHub App configuration. Passing CI does not substitute for testing a real external OAuth handshake.
-
-The claim-to-evidence notes for earlier GitHub OAuth and Stripe CLI sessions are in [docs/verification.md](docs/verification.md). Those sessions were local. They are not a public production deployment.
+Final portfolio screenshots: [docs/assets/final/](docs/assets/final/). Recovery demos: [docs/failure-recovery-demo.md](docs/failure-recovery-demo.md).
 
 ## Security boundaries
 
@@ -239,11 +256,15 @@ Details and the things this model does not claim are in [docs/threat-model.md](d
 
 ## Known limitations
 
-- SDK observations are not an independent probe of the upstream service.
+- AWS is **not** live-deployed (Terraform validated only).
+- No enterprise user/RBAC/tenant isolation — single-operator model.
+- Background webhook worker is not continuously scheduled by default (operator/`process-due`).
+- SDK telemetry is trusted client reporting, not independent upstream observation.
+- No production paging/alerts; retention/partitioning is not production scale.
+- Portfolio network topology tradeoffs apply (local Compose / optional later AWS).
+- Stripe signing secret is process-scoped (one secret per backend process), not per-integration UI-managed.
+- GitHub OAuth requires a local OAuth App and operator browser consent on each new machine; the 2026-10-17 native-laptop run completed that path (see verification docs).
 - p95 latency is withheld below 20 observations.
-- Diagnostics do not run for instrumented applications.
-- Webhook processing does not run by itself.
-- AWS Terraform has been validated, not applied.
 - The Python and Node SDKs are installed from this repository only.
 - `localhost:8080` is your machine. There is no public hosted demo.
 

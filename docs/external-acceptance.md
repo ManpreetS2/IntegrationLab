@@ -1,165 +1,146 @@
-# External Acceptance Runbook
+# External Acceptance Runbook & Results
 
 Executable checklist for proving IntegrationLab against **real** GitHub and
-Stripe test-mode infrastructure.
+Stripe test-mode infrastructure, plus SDK/local gates that are often confused
+with external proof.
 
-Vocabulary (do not collapse):
+Vocabulary:
 
 | Status | Meaning |
 |--------|---------|
-| **Implemented** | Code/config exists in the repository |
-| **CI verified** | Automated CI exercised it |
-| **Locally verified** | Ran successfully on a developer machine (Compose/stack) |
-| **Externally verified** | Real provider/cloud interaction completed successfully |
+| **PASS** | The step ran successfully in this acceptance window |
+| **FAIL** | The step ran and did not meet the bar |
+| **BLOCKED** | Could not run (missing interactive consent, tooling, etc.) |
+| **NOT RUN** | Intentionally skipped |
 
-Never mark a claim **Externally verified** unless the provider step actually ran.
-
----
-
-## 0. Prerequisites
-
-| Item | Expected |
-|------|----------|
-| `main` SHA baseline | Contains support-operations foundation (PR #14) |
-| Docker / Compose | `docker compose version` works |
-| Local secrets file | Project-root `.env` and/or `backend/.env` (gitignored) |
-| Operator key | Prefer a generated `OPERATOR_API_KEY` (`secrets.token_urlsafe(32)`). Compose has a documented demo default; override it before real provider credentials. |
-| Token cipher | `TOKEN_ENCRYPTION_KEY` (Fernet) |
-| GitHub OAuth App | Client ID + secret |
-| Stripe CLI | Installed + `stripe login` (test mode) |
-
-Secret presence only — never paste secret values into docs or chat.
-
-Canonical full-stack entrypoint:
-
-```bash
-make compose-up
-# Console: http://localhost:8080
-# Unlock with OPERATOR_API_KEY from local .env
-```
-
-Same-origin browser routes (nginx → backend):
-
-| Purpose | URL |
-|---------|-----|
-| Console | `http://localhost:8080` |
-| Operator probe | `http://localhost:8080/auth/operator` |
-| GitHub OAuth callback | `http://localhost:8080/api/oauth/github/callback` |
-| Stripe webhook | `http://localhost:8080/webhooks/stripe/{integration_id}` |
-| Health | `http://localhost:8080/health` |
-
-Compose injects `GITHUB_*`, `TOKEN_ENCRYPTION_KEY`, and `STRIPE_WEBHOOK_SECRET`
-from the project-root `.env` into the backend service.
+Never promote **BLOCKED** or mocked tests to **PASS**.
 
 ---
 
-## 1. Stack boot (Locally verified gate)
+## Environment (this run)
 
-| Step | Action | Expected | Evidence |
-|------|--------|----------|----------|
-| 1.1 | `make compose-up` | postgres healthy → migrate → backend healthy → frontend on `:8080` | `docker compose -f docker-compose.full.yml ps` |
-| 1.2 | `curl -sS http://localhost:8080/health` | JSON healthy | response body |
-| 1.3 | `curl -sS http://localhost:8080/ready` | ready | response body |
-| 1.4 | `curl -sS http://localhost:8080/auth/operator` | JSON capability probe (not SPA HTML) | `Content-Type: application/json` |
-| 1.5 | Unlock console with operator key | Dashboard loads | screenshot (no key visible) |
+| Item | Value |
+|------|-------|
+| Date | 2026-10-15 |
+| Commit | `954ed0960014204bafdfaf607b47f9a7ea5179fa` |
+| Stack | `docker compose -f docker-compose.full.yml` |
+| UI | `http://localhost:8080` |
+| API | `http://127.0.0.1:8000` |
+| Stripe CLI | 1.53.0 (sandbox account) |
+| Listen | `stripe listen --all-snapshot --forward-to http://localhost:8000/webhooks/stripe/<integration-id>` |
 
-Classification after success: **Locally verified** (stack boot).
+Secrets stay in local `.env` only.
 
----
+### Follow-up: new laptop (2026-10-17)
 
-## 2. GitHub OAuth App setup
+See **New-laptop recovery re-verification** in [`verification-current.md`](verification-current.md).
 
-Create at [GitHub → Developer settings → OAuth Apps](https://github.com/settings/developers).
-
-| Field | Value for Compose acceptance |
-|-------|------------------------------|
-| Application name | `IntegrationLab Local` |
-| Homepage URL | `http://localhost:8080` |
-| Authorization callback URL | `http://localhost:8080/api/oauth/github/callback` |
-
-Place into project-root `.env` (and `backend/.env` if used for non-Compose runs):
-
-```bash
-GITHUB_CLIENT_ID=...
-GITHUB_CLIENT_SECRET=...
-GITHUB_OAUTH_REDIRECT_URI=http://localhost:8080/api/oauth/github/callback
-FRONTEND_URL=http://localhost:8080
-TOKEN_ENCRYPTION_KEY=...   # already generated locally; do not rotate after tokens exist
-OPERATOR_API_KEY=...
-```
-
-Then recreate the backend container so env is picked up:
-
-```bash
-docker compose -f docker-compose.full.yml up -d --force-recreate backend
-```
+| Item | Value |
+|------|-------|
+| Date | 2026-10-17 |
+| Starting commit | `cd8725f04584cec4d3db64990316cca0c7de7ad4` (then docs commit on same branch) |
+| Stack | Native Postgres 18 + uvicorn + Vite `:8080` proxy (Docker Desktop blocked: revoked signing cert) |
+| GitHub interactive OAuth | **PASS** (operator consent; login `ManpreetS2`) |
+| GitHub revoke → reconnect | **PASS** (real HTTP 401 → needs_setup → reconnect → healthy) |
+| Stripe CLI rerun | **NOT RUN** (CLI absent); prior CLI PASS retained |
+| Locally signed Stripe + processing recovery | **PASS** on this machine |
 
 ---
 
-## 3. GitHub OAuth happy path
+## GitHub external acceptance
 
-| Step | Action | Expected | Evidence |
-|------|--------|----------|----------|
-| 3.1 | Create/select GitHub integration (professional name) | Integration row exists, env ≠ production unless intentional | Integrations UI |
-| 3.2 | Connect GitHub | Browser redirect to GitHub authorize | audit `github_connect_requested`, actor `browser_handoff` |
-| 3.3 | Approve `read:user` | Callback returns to console | connected status |
-| 3.4 | Profile shown | Safe login/name/avatar fields only | screenshot |
-| 3.5 | Token at rest | Encrypted column only; no plaintext in API/logs/UI | DB spot-check / API responses |
-| 3.6 | Connection check / diagnostics | Real `provider_request` with `is_simulated=false` | Requests + Diagnostics |
-| 3.7 | Support case | Pin real evidence, note, transition, timeline, audit | Support Cases + Audit |
+### Run A — 2026-10-15 (Compose / prior laptop)
 
-Classification after success: **Externally verified** (GitHub OAuth + real `/user`).
+| # | Step | Expected | Result |
+|---|------|----------|--------|
+| G1 | Connect handoff | Browser leaves app for `github.com/login/oauth/authorize` | **PASS** (API 302) |
+| G2 | state + PKCE S256 | Query includes `state`, `code_challenge`, `code_challenge_method=S256` | **PASS** |
+| G3 | Authorize | Operator consents on GitHub | **BLOCKED** (interactive) |
+| G4 | Callback to Ledger | Returns to current UI connected | **BLOCKED** |
+| G5 | Identity `/user` | Real login appears | **BLOCKED** |
+| G6 | Check connection | Authenticated `/user` success | **BLOCKED** |
+| G7 | Diagnostics | Real probe, not simulated | **BLOCKED** |
+| G8 | Restart persistence | Encrypted credential still works | **BLOCKED** |
+| G9 | Cancel/deny authorize | Friendly cancellation, not connected | **NOT RUN** |
+| G10 | Revoke → recover | Real 401 → reconnect → healthy | **BLOCKED** |
 
-### Negative path (pick at least one)
+**GITHUB EXTERNAL ACCEPTANCE (2026-10-15): BLOCKED — interactive GitHub authorization required.**
 
-| Option | Action | Expected |
-|--------|--------|----------|
-| A. Deny/cancel | Start connect, deny on GitHub | No credentials; safe redirect; no raw `error_description` leak |
-| B. Revoke | Revoke app in GitHub settings → run check | Real auth failure evidence; not “provider globally down”; reconnect works |
+### Run B — 2026-10-17 (new laptop, native `:8080`)
+
+| # | Step | Expected | Result |
+|---|------|----------|--------|
+| G1 | Connect handoff | Browser leaves app for `github.com/login/oauth/authorize` | **PASS** (HTTP 302) |
+| G2 | state + PKCE S256 | Query includes `state`, `code_challenge`, `code_challenge_method=S256` | **PASS** |
+| G3 | Authorize | Operator consents on GitHub | **PASS** |
+| G4 | Callback to Ledger | Returns to current UI connected | **PASS** |
+| G5 | Identity `/user` | Real login appears | **PASS** (`ManpreetS2`) |
+| G6 | Check connection | Authenticated `/user` success | **PASS** |
+| G7 | Diagnostics | Real probe, not simulated | **PASS** (`overall_status=pass`) |
+| G8 | Restart persistence | Encrypted credential still works | **PASS** |
+| G9 | Cancel/deny authorize | Friendly cancellation, not connected | **NOT RUN** (covered by automated callback tests) |
+| G10 | Revoke → recover | Real 401 → reconnect → healthy | **PASS** |
+
+**GITHUB EXTERNAL ACCEPTANCE (2026-10-17): PASS**
+
+Automated OAuth tests remain separate evidence (`VERIFIED CURRENT AUTOMATED`).
+---
+
+## Stripe test-mode external acceptance
+
+| # | Step | Expected | Result |
+|---|------|----------|--------|
+| S1 | Stripe CLI listen | Ready + ephemeral signing secret | **PASS** |
+| S2 | `payment_intent.succeeded` | 2xx, verified, processed, effect | **PASS** |
+| S3 | `payment_intent.payment_failed` | effect `payment_failure_recorded` | **PASS** |
+| S4 | `charge.refunded` | effect `refund_recorded` | **PASS** |
+| S5 | Unknown/unsupported types | ignored, not failed | **PASS** |
+| S6 | Invalid signature | 400, no event | **PASS** |
+| S7 | Same-event redelivery | `delivery_count=2`, one effect | **PASS** (`stripe events resend`) |
+| S8 | Processor retry / failed queue / manual retry | See recovery demo | **PASS** (controlled local after external receipt path proven) |
+
+**STRIPE TEST-MODE ACCEPTANCE: PASS**
 
 ---
 
-## 4. Stripe CLI acceptance
+## Failure / recovery demonstrations
 
-| Step | Action | Expected | Evidence |
-|------|--------|----------|----------|
-| 4.1 | `stripe version` + `stripe login` | CLI authenticated (test mode) | CLI status (no secrets logged) |
-| 4.2 | Note Stripe integration UUID from UI/API | UUID for webhook path | Integrations |
-| 4.3 | `stripe listen --forward-to http://localhost:8080/webhooks/stripe/<id>` | Forwarding; CLI prints `whsec_...` | — |
-| 4.4 | Put signing secret in `.env` as `STRIPE_WEBHOOK_SECRET` and recreate backend | Webhook endpoint accepts signed events | — |
-| 4.5 | Trigger supported event (e.g. `payment_intent.succeeded`) | Signature OK; durable receipt | Webhooks UI |
-| 4.6 | Operator process | Attempt + effect; `webhook_process_requested` audit before process | Attempts / Audit / correlation |
-| 4.7 | Duplicate delivery | Same provider event id → `delivery_count`↑; one effect | Detail view |
-| 4.8 | Controlled failure (`object` missing / known permanent path) | Failed/retry semantics | Failed queue |
-| 4.9 | Manual retry / dismiss as appropriate | Audit + attempt correlation | Audit |
+See `docs/failure-recovery-demo.md`.
 
-Classification after success: **Externally verified** (Stripe signed webhook test-mode).
-
-Mark duplicate delivery **Externally verified** only if the second delivery used a legitimate signed redelivery with the same provider event id.
+| Demo | Result |
+|------|--------|
+| A GitHub credential recovery | **PASS** (2026-10-17 native laptop; real revoke → 401 → reconnect) |
+| B Stripe internal processing recovery | **PASS** |
+| C SDK credential rotate/revoke | **PASS** |
 
 ---
 
-## 5. Screenshots (safe)
+## SDK acceptance
 
-Directory: `docs/assets/portfolio/`
-
-Capture without secrets, operator key, cookies, or private paths:
-
-1. GitHub connected integration
-2. Real provider request (`simulated=false`)
-3. Diagnostics run
-4. Support case + timeline
-5. Audit / correlation
-6. Stripe event detail (attempts/effects)
-7. Failed/retry queue (if exercised)
+| SDK | Ingest | Sanitize | Rotate | Revoke | Result |
+|-----|--------|----------|--------|--------|--------|
+| Python | PASS | PASS | PASS | PASS | **PASS** |
+| Node | PASS | PASS | N/A this pass | PASS | **PASS** |
 
 ---
 
-## 6. After acceptance — docs to update
+## Results matrix
 
-- [x] `docs/verification.md` — upgrade only proven rows
-- [x] README verification section
-- [x] `docs/demo-script.md` — use real story
-- [x] Portfolio screenshots committed (safe only) — `docs/assets/portfolio/`
-
-AWS `terraform apply` is **out of scope** for this runbook.
+| Test | Result | Evidence | Notes |
+|------|--------|----------|-------|
+| GitHub connect | PASS (2026-10-17) | 302 + PKCE + operator consent | Oct 15 run was BLOCKED; see Run A/B |
+| GitHub identity `/user` | PASS (2026-10-17) | login `ManpreetS2` | REAL request logs |
+| GitHub diagnostics | PASS (2026-10-17) | `overall_status=pass` | Not Failure Lab |
+| GitHub authorization cancel | NOT RUN | Automated callback tests exist | — |
+| GitHub revoked authorization detected | PASS (2026-10-17) | REAL `GET /user` 401 | `needs_setup` |
+| GitHub reconnect recovery | PASS (2026-10-17) | reconnect → healthy | Historical 401 retained |
+| Stripe CLI connection | PASS | listen log 200s | `--all-snapshot` required on CLI 1.53 |
+| Stripe payment_intent.succeeded | PASS | `evt_3…` processed | |
+| Stripe payment_intent.payment_failed | PASS | effect recorded | |
+| Stripe charge.refunded | PASS | effect recorded | |
+| Stripe invalid signature rejection | PASS | HTTP 400 | |
+| Stripe duplicate redelivery | PASS | resend same event id | |
+| Stripe processor retry | PASS | 1s/2s/4s delays | Controlled handler fault |
+| Stripe failed queue | PASS | API `/failed` | |
+| Stripe manual retry recovery | PASS | effect once | |
+| Stripe effect-once proof | PASS | effect_count=1 | After retries + manual retry + prior resend path |
