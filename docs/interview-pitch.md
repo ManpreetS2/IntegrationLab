@@ -10,14 +10,14 @@ When integrations fail, the hard part is knowing what you actually observed. Int
 
 GitHub uses OAuth with state and PKCE; tokens never reach the browser. Stripe test-mode webhooks are verified on the raw body, stored, and processed later with delivery dedupe and effect-level idempotency. I demonstrated real Stripe CLI delivery, same-event redelivery, and a recovery path where processing fails with 1s/2s/4s backoff into a failed queue, then manual retry applies the effect once. Python and Node SDKs report sanitized HTTP outcomes from an instrumented app—labeled as client reports, not upstream probes. Support cases pin eligible evidence with an audit trail.
 
-I do **not** claim AWS is live or that GitHub OAuth was re-verified externally in the latest run without interactive consent. The strongest story is webhook delivery vs processing failure and honest evidence classes.
+I do **not** claim AWS is live. GitHub OAuth was completed externally on 2026-10-17 against github.com (including revoke→detect→reconnect). The strongest story is still honest evidence classes: delivery vs processing for Stripe, REAL vs SIMULATED GitHub rows, and SDK-reported vs upstream-verified.
 
 ## 5 minutes
 
 1. **Problem** — Ambiguous partner failures; mixed logs mislead operators.  
 2. **Overview** — Ledger health from stored evidence; unknown ≠ healthy.  
 3. **Evidence sources** — Provider / webhook / simulation / SDK-reported.  
-4. **GitHub** — OAuth design (state/PKCE/encrypted token); note current external authorize may be blocked pending interactive login; automated tests cover callback safety.  
+4. **GitHub** — OAuth state/PKCE/encrypted token; live authorize; Check Connection `/user`; revoke→401→reconnect recovery with historical failures retained.  
 5. **Failure Lab** — Deterministic failure shapes; never pollute live health.  
 6. **Stripe** — CLI test-mode acceptance; signature verify; process-due; duplicate resend.  
 7. **Failure/recovery** — Demo B: receipt OK → handler fault → retries → failed queue → fix → manual retry → one effect.  

@@ -2,7 +2,7 @@
 
 Audience: internship / Solutions Engineer interview.
 
-Prefer **current external Stripe + local SDK/recovery** evidence. Say **BLOCKED** out loud if GitHub interactive OAuth is not completed. Always label **SIMULATED** Failure Lab rows.
+Prefer **current external GitHub OAuth + Stripe (CLI prior / local HMAC) + SDK/recovery** evidence. Always label **SIMULATED** Failure Lab rows. Do not present Stripe CLI as re-run on the new laptop unless you actually re-ran it.
 
 Screenshots: `docs/assets/final/`. Evidence: `docs/portfolio-evidence.md`.
 
@@ -34,9 +34,9 @@ Say the four classes. Point at Requests / Webhooks / Failures (include simulatio
 
 ### 4. GitHub OAuth (45–60s)
 
-Show Connect GitHub → leaves for GitHub authorize (state + PKCE).  
-If not authorized this session: “Design and automated tests are green; interactive consent is the remaining gate.”  
-Do not fake a connected profile.
+Show connected GitHub identity (or Connect → authorize with state + PKCE).  
+Mention encrypted server-side token, Check Connection / Diagnostics as REAL `/user` probes, and the revoke→401→reconnect recovery demo.  
+Keep Failure Lab simulations visually separate from those REAL rows.
 
 ### 5. Failure Lab (40s)
 

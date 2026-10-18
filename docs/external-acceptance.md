@@ -38,15 +38,18 @@ See **New-laptop recovery re-verification** in [`verification-current.md`](verif
 | Item | Value |
 |------|-------|
 | Date | 2026-10-17 |
-| Starting commit | `388c3357a1b6b344c0a0c2a0e27addb052bfe0b9` (PR #39 head) |
+| Starting commit | `cd8725f04584cec4d3db64990316cca0c7de7ad4` (then docs commit on same branch) |
 | Stack | Native Postgres 18 + uvicorn + Vite `:8080` proxy (Docker Desktop blocked: revoked signing cert) |
-| GitHub interactive OAuth | **BLOCKED** (no local OAuth App credentials yet) |
+| GitHub interactive OAuth | **PASS** (operator consent; login `ManpreetS2`) |
+| GitHub revoke → reconnect | **PASS** (real HTTP 401 → needs_setup → reconnect → healthy) |
 | Stripe CLI rerun | **NOT RUN** (CLI absent); prior CLI PASS retained |
 | Locally signed Stripe + processing recovery | **PASS** on this machine |
 
 ---
 
 ## GitHub external acceptance
+
+### Run A — 2026-10-15 (Compose / prior laptop)
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
@@ -61,10 +64,26 @@ See **New-laptop recovery re-verification** in [`verification-current.md`](verif
 | G9 | Cancel/deny authorize | Friendly cancellation, not connected | **NOT RUN** |
 | G10 | Revoke → recover | Real 401 → reconnect → healthy | **BLOCKED** |
 
-**GITHUB EXTERNAL ACCEPTANCE: BLOCKED — interactive GitHub authorization required.**
+**GITHUB EXTERNAL ACCEPTANCE (2026-10-15): BLOCKED — interactive GitHub authorization required.**
+
+### Run B — 2026-10-17 (new laptop, native `:8080`)
+
+| # | Step | Expected | Result |
+|---|------|----------|--------|
+| G1 | Connect handoff | Browser leaves app for `github.com/login/oauth/authorize` | **PASS** (HTTP 302) |
+| G2 | state + PKCE S256 | Query includes `state`, `code_challenge`, `code_challenge_method=S256` | **PASS** |
+| G3 | Authorize | Operator consents on GitHub | **PASS** |
+| G4 | Callback to Ledger | Returns to current UI connected | **PASS** |
+| G5 | Identity `/user` | Real login appears | **PASS** (`ManpreetS2`) |
+| G6 | Check connection | Authenticated `/user` success | **PASS** |
+| G7 | Diagnostics | Real probe, not simulated | **PASS** (`overall_status=pass`) |
+| G8 | Restart persistence | Encrypted credential still works | **PASS** |
+| G9 | Cancel/deny authorize | Friendly cancellation, not connected | **NOT RUN** (covered by automated callback tests) |
+| G10 | Revoke → recover | Real 401 → reconnect → healthy | **PASS** |
+
+**GITHUB EXTERNAL ACCEPTANCE (2026-10-17): PASS**
 
 Automated OAuth tests remain separate evidence (`VERIFIED CURRENT AUTOMATED`).
-
 ---
 
 ## Stripe test-mode external acceptance
@@ -90,7 +109,7 @@ See `docs/failure-recovery-demo.md`.
 
 | Demo | Result |
 |------|--------|
-| A GitHub credential recovery | **BLOCKED** |
+| A GitHub credential recovery | **PASS** (2026-10-17 native laptop; real revoke → 401 → reconnect) |
 | B Stripe internal processing recovery | **PASS** |
 | C SDK credential rotate/revoke | **PASS** |
 
@@ -109,12 +128,12 @@ See `docs/failure-recovery-demo.md`.
 
 | Test | Result | Evidence | Notes |
 |------|--------|----------|-------|
-| GitHub connect | BLOCKED | Connect 302 + PKCE only | Needs interactive authorize |
-| GitHub identity `/user` | BLOCKED | — | — |
-| GitHub diagnostics | BLOCKED | — | — |
+| GitHub connect | PASS (2026-10-17) | 302 + PKCE + operator consent | Oct 15 run was BLOCKED; see Run A/B |
+| GitHub identity `/user` | PASS (2026-10-17) | login `ManpreetS2` | REAL request logs |
+| GitHub diagnostics | PASS (2026-10-17) | `overall_status=pass` | Not Failure Lab |
 | GitHub authorization cancel | NOT RUN | Automated callback tests exist | — |
-| GitHub revoked authorization detected | BLOCKED | — | — |
-| GitHub reconnect recovery | BLOCKED | — | — |
+| GitHub revoked authorization detected | PASS (2026-10-17) | REAL `GET /user` 401 | `needs_setup` |
+| GitHub reconnect recovery | PASS (2026-10-17) | reconnect → healthy | Historical 401 retained |
 | Stripe CLI connection | PASS | listen log 200s | `--all-snapshot` required on CLI 1.53 |
 | Stripe payment_intent.succeeded | PASS | `evt_3…` processed | |
 | Stripe payment_intent.payment_failed | PASS | effect recorded | |

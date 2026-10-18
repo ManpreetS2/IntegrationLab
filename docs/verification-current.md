@@ -176,17 +176,41 @@ See `docs/assets/final/` (overview light/dark live; other Ledger pages from curr
 
 ### GitHub external acceptance (this machine)
 
+Earlier the same day (before OAuth App credentials existed locally), Connect returned **503** and interactive grant was **BLOCKED**. That intermediate state is superseded by the completed run below; the Oct 15–16 CURRENT Ledger block in the section above remains historical for that earlier environment.
+
 | Step | Result |
 | --- | --- |
-| OAuth App credentials in local `.env` | **Absent** at recovery time |
-| Connect without credentials | **503** with safe configuration message (expected) |
-| Interactive authorize / callback / connected identity | **BLOCKED** — needs OAuth App Client ID/secret + operator browser consent |
-| Revoke → recover | **BLOCKED** (depends on connected grant) |
+| OAuth App credentials in gitignored `backend/.env` + project `.env` | **Yes** (values not recorded) |
+| Config load | **PASS** — uvicorn cwd `backend/` loads relative `.env`; Fernet key preserved |
+| Connect → `github.com/login/oauth/authorize` | **PASS** (HTTP 302) |
+| `state` + PKCE `S256` + scope `read:user` | **PASS** |
+| Interactive authorize / callback to Ledger UI | **PASS** (operator browser consent) |
+| Connected identity | **PASS** — `login=ManpreetS2`, scopes `read:user` |
+| Check Connection | **PASS** — `ok=true`, authenticated `GET /user` |
+| Guided Diagnostics | **PASS** — `overall_status=pass` |
+| Request logs REAL (not simulated) | **PASS** — `GET /user` 200 and token exchange; `is_simulated=false` |
+| Backend restart persistence | **PASS** — still `connected`; Check Connection succeeds (encrypted token) |
+| Token absent from API profile/check payloads | **PASS** |
 
-**GITHUB EXTERNAL ACCEPTANCE (2026-10-17 laptop): BLOCKED**
+**GITHUB EXTERNAL ACCEPTANCE (2026-10-17 laptop): PASS**
 
-Historical GitHub external rows in `docs/verification.md` remain separate historical evidence. The Oct 15–16 CURRENT Ledger interactive block above is unchanged.
+#### GitHub revoke → recover (same session)
 
+| Step | Result |
+| --- | --- |
+| Operator revoked only IntegrationLab OAuth App authorization | **PASS** (operator action) |
+| Check Connection after revoke | **PASS** — `ok=false`, `error=github_unauthorized`, status `needs_setup` |
+| Diagnostics | **PASS** — `overall_status=fail`, summary cites GitHub authentication / `GET /user` HTTP 401 |
+| Failures | **PASS** — real rows (`simulated=false`): credential rejected HTTP 401 |
+| Overview recommendation | **PASS** — reconnect stored OAuth credential |
+| Reconnect + operator consent | **PASS** |
+| Check Connection + Diagnostics after reconnect | **PASS** — `ok=true`, `overall_status=pass`, health `healthy` |
+| Historical failure retained | **PASS** — prior REAL `GET /user` 401 rows remain alongside new 200s |
+
+**GITHUB FAILURE/RECOVERY (2026-10-17 laptop): PASS**
+
+Evidence captured on branch `feat/final-portfolio-polish` starting from `cd8725f`; the docs commit that records this PASS is the tip after push.  
+Oct 15–16 interactive BLOCKED rows above are unchanged historical evidence for that run.
 ### Stripe (this machine)
 
 | Class | Result |
@@ -218,6 +242,6 @@ Browser MCP cannot reach host loopback from this agent; Computer Use requires Ac
 ### Honest non-claims
 
 - AWS Terraform still **not applied**.
-- Docker Compose full stack **not** re-verified on this laptop.
-- GitHub interactive OAuth **not** completed on this laptop.
-- Stripe CLI external listen **not** repeated on this laptop (prior evidence retained).
+- Docker Compose full stack **not** re-verified on this laptop (Docker Desktop cert revoked).
+- Stripe CLI external listen **not** repeated on this laptop (prior CLI PASS retained; local HMAC + recovery re-verified here).
+- Visual Ledger screenshot retakes were not required; existing `docs/assets/final/` set remains the portfolio media. Agent browser automation lacked host loopback / Computer Use permissions; operator completed interactive OAuth in a local browser.

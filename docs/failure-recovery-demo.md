@@ -4,7 +4,7 @@ Three demos with different trust levels. Do not conflate them in interviews.
 
 | Demo | Evidence class |
 |------|----------------|
-| A — GitHub credential recovery | Real provider (when unblocked) |
+| A — GitHub credential recovery | Real provider (verified 2026-10-17) |
 | B — Stripe processing recovery | Durable receipt + controlled internal fault |
 | C — SDK ingestion credential recovery | Real local client reporting |
 
@@ -14,17 +14,25 @@ Failure Lab remains a **controlled simulation** of provider failure *shapes*. It
 
 ## Demo A — GitHub credential recovery
 
-**Status this run: BLOCKED** (no completed current OAuth grant).
+**Status this run: PASS** (2026-10-17, native macOS stack, Ledger UI v3 / `:8080` proxy).
 
-### Script (when unblocked)
+### Observed (2026-10-17)
 
-1. **Starting state:** GitHub integration connected; Check Connection + Diagnostics pass; request log shows real (non-simulated) `/user` success.
-2. **Action:** In GitHub → Settings → Applications, revoke **only** this IntegrationLab OAuth App authorization.
-3. **Observed:** Check Connection fails with provider auth failure; Failures shows **real** (not simulated); health needs attention.
-4. **Diagnosis:** Diagnostics recommend reconnect / re-authorize (without overclaiming a single root cause).
-5. **Recovery:** Reconnect GitHub → authorize → Check Connection + Diagnostics succeed.
-6. **Final evidence:** New success rows; historical failure retained.
-7. **Proves:** Encrypted credential lifecycle, real provider auth failure detection, operator reconnect path.
+1. **Starting state:** Demo GitHub `connected` as `ManpreetS2`; Check Connection `ok=true`; Diagnostics `overall_status=pass`; REAL `GET /user` 200 rows (`is_simulated=false`). Encrypted credential survived a backend restart.
+2. **Action:** Operator revoked **only** the IntegrationLab OAuth App authorization in GitHub Settings → Applications.
+3. **Observed:** Check Connection → `ok=false`, `error=github_unauthorized`, status `needs_setup`. Failures listed real provider rows: HTTP 401 on `GET /user` (`simulated=false`). Overview health `failed` with recommendation to reconnect.
+4. **Diagnosis:** Diagnostics `overall_status=fail` — “GitHub authentication” / `GET /user` returned HTTP 401.
+5. **Recovery:** Reconnect GitHub → operator consent → Check Connection `ok=true`; Diagnostics `pass`; health `healthy`.
+6. **Final evidence:** New REAL `GET /user` 200 rows; historical REAL 401 rows retained in the request/failure history.
+7. **Proves:** Encrypted credential lifecycle, real provider auth failure detection (not a synthetic 401 insert), operator reconnect path.
+
+### Script (repeatable)
+
+1. Confirm connected + Check Connection + Diagnostics pass with REAL `/user` success.
+2. Revoke only this OAuth App in GitHub Settings → Applications.
+3. Check Connection → expect unauthorized / `needs_setup`.
+4. Failures + Diagnostics → authentication problem; recommend reconnect.
+5. Reconnect + authorize → healthy; keep historical failures.
 
 ---
 
