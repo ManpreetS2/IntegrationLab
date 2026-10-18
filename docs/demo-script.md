@@ -20,53 +20,53 @@ Screenshots: `docs/assets/final/`. Evidence: `docs/portfolio-evidence.md`.
 
 ## 5–7 minute engineering walkthrough
 
-### 1. Problem (30s)
+### 1. Problem (20s)
 
 Third-party integrations fail ambiguously. Operators need provenance: provider vs webhook vs simulation vs SDK report.
 
-### 2. Overview (40s)
+### 2. Overview (25s)
 
 `/#/overview` — attention counts, Database reachable, Stripe/SDK degraded cards. Simulations never alter live health.
 
-### 3. Evidence sources (30s)
+### 3. Evidence sources (20s)
 
 Say the four classes. Point at Requests / Webhooks / Failures (include simulations) / Telemetry copy.
 
-### 4. GitHub OAuth (45–60s)
+### 4. GitHub OAuth (35s)
 
 Show connected GitHub identity (or Connect → authorize with state + PKCE).  
 Mention encrypted server-side token, Check Connection / Diagnostics as REAL `/user` probes, and the revoke→401→reconnect recovery demo.  
 Keep Failure Lab simulations visually separate from those REAL rows.
 
-### 5. Failure Lab (40s)
+### 5. Failure Lab (25s)
 
 Run `unauthorized_401`. Show diagnosis + simulated badge. Toggle include simulations on Failures.
 
-### 6. Stripe delivery / idempotency (60s)
+### 6. Stripe delivery / idempotency (45s)
 
 Webhooks page: recent `evt_3…` processed effects. Mention CLI acceptance and `stripe events resend` → `delivery_count=2`, one effect.
 
-### 7. Failure / recovery (75s)
+### 7. Failure / recovery (50s)
 
 Tell Demo B: delivery 2xx → processing fault → 1s/2s/4s → failed queue → manual retry → one effect. Contrast invalid signature 400.
 
-### 8. SDK telemetry (45s)
+### 8. SDK telemetry (35s)
 
 Telemetry page: `independently_verified: no`. Credential generate/rotate/revoke narrative.
 
-### 9. Diagnostics (30s)
+### 9. Diagnostics (20s)
 
 Open diagnostics for Stripe/GitHub cards; explain operator-triggered probes.
 
-### 10. Support case / audit (45s)
+### 10. Support case / audit (30s)
 
 Open Support Cases + Audit: note, status, pinned Failure Lab evidence; SDK cannot be pinned.
 
-### 11. Architecture / tradeoffs (40s)
+### 11. Architecture / tradeoffs (25s)
 
 Compose local; six-job CI; Terraform AWS not applied; no always-on webhook worker; single-operator.
 
-### 12. Close (20s)
+### 12. Close (15s)
 
 Offer deep-dive: idempotency, OAuth threat model, or evidence honesty.
 
