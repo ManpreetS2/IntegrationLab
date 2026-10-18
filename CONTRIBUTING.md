@@ -2,7 +2,7 @@
 
 Thanks for taking an interest in IntegrationLab. This is a **single-operator, self-hosted portfolio project** for learning, reproducing, and investigating GitHub API and Stripe test-mode webhook failure modes—not a production integration gateway or hosted service.
 
-**Current scope is intentionally feature-complete for v1.** Documentation fixes, clear bug reports, reproducible security issues, test regressions, and small correctness improvements are welcome. Please discuss larger feature ideas in an issue first; the deferred roadmap is in [docs/phase-2-backlog.md](docs/phase-2-backlog.md). A request or issue does not mean a new implementation phase is planned.
+**The current Ledger UI v3 portfolio scope is intentionally feature-complete.** Documentation fixes, clear bug reports, reproducible security issues, test regressions, and small correctness improvements are welcome. Please discuss larger feature ideas in an issue first; the deferred roadmap is in [docs/phase-2-backlog.md](docs/phase-2-backlog.md). A request or issue does not mean a new implementation phase is planned.
 
 ## Run the demo without provider credentials
 
