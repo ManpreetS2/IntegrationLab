@@ -8,9 +8,9 @@ This is a local portfolio application. It is not a hosted monitoring service, an
 
 [![IntegrationLab CI](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml)
 
-![IntegrationLab Ledger UI v3 — light overview](design/stage2/overview-light-desktop.png)
+![IntegrationLab Ledger UI v3 — light overview](docs/assets/final/overview-light.png)
 
-*Current local console on `main`: Ledger UI v3, light appearance. Health comes from stored evidence; absent observations are not silently shown as healthy.*
+*Current local console: Ledger UI v3. Health comes from stored evidence; absent observations are not silently shown as healthy.*
 
 [![Watch the archived IntegrationLab v2 demo](docs/media/integrationlab-v2-thumbnail.png)](docs/media/integrationlab-v2-demo.mp4)
 
@@ -43,9 +43,9 @@ The current interface uses **Ledger**, a restrained, evidence-first design acros
 
 The Ledger redesign uses the existing v2 API contracts and backend health calculations. It does **not** add hosted monitoring, automatic webhook workers, tenant isolation, or upstream verification.
 
-![Ledger v3 — dark telemetry](design/stage2/telemetry-dark-desktop.png)
+![Ledger v3 — GitHub diagnostics](docs/assets/final/github-diagnostics.png)
 
-![Ledger v3 — webhook investigation](design/stage2/webhooks-light-desktop.png)
+![Ledger v3 — Stripe failed-queue recovery](docs/assets/final/stripe-failed-recovery.png)
 
 ## Universal Monitoring v2
 
@@ -64,7 +64,7 @@ The console shows those rows on **Telemetry**, not on the provider request log.
 
 Switching the selected application hides the previous application's credential prefixes and telemetry until the new response arrives.
 
-![SDK-reported telemetry in Ledger v3 light appearance](design/stage2/telemetry-light-desktop.png)
+![SDK-reported telemetry in Ledger v3](docs/assets/final/telemetry.png)
 
 ## GitHub and Stripe
 
@@ -74,17 +74,11 @@ Stripe uses one webhook signing secret for the process. The console shows the lo
 
 Failure Lab, guided diagnostics, GitHub OAuth, and the Stripe webhook receiver are unavailable for instrumented applications. The UI disables those actions instead of pretending they apply.
 
-![Stripe webhook investigation in Ledger v3](design/stage2/webhooks-dark-desktop.png)
-
 ## Light and dark
 
 Ledger UI v3 has warm paper-and-ink light and warm near-black dark appearances. Choose **System**, **Light**, or **Dark** in the console. System follows the operating system, including later changes. The choice is stored in this browser.
 
-![Ledger v3 — dark overview](design/stage2/overview-dark-desktop.png)
-
-![Ledger v3 — telemetry on a phone, light](design/stage2/telemetry-light-mobile.png)
-
-![Ledger v3 — telemetry on a phone, dark](design/stage2/telemetry-dark-mobile.png)
+![Ledger v3 — dark overview](docs/assets/final/overview-dark.png)
 
 ## Architecture
 
@@ -215,8 +209,8 @@ Backend pytest (367), frontend lint + unit (30) + production build, Python/Node 
 
 ### Current external acceptance
 
-- **GitHub OAuth:** connect handoff with state + PKCE verified; full interactive authorize/callback against github.com is **BLOCKED** until an operator completes consent in the browser.
-- **Stripe test mode:** Stripe CLI sandbox listen accepted signed events (`payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`); same-event redelivery kept one effect.
+- **GitHub OAuth (2026-10-17):** interactive authorize/callback against github.com **PASS**; connected identity; real `GET /user`; diagnostics pass; encrypted token survived backend restart; revoke → real HTTP 401 → reconnect → healthy (**PASS**). Details: [external-acceptance.md](docs/external-acceptance.md), [verification-current.md](docs/verification-current.md).
+- **Stripe test mode:** Stripe CLI sandbox listen on an earlier environment accepted signed events (`payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`) with same-event redelivery keeping one effect. The 2026-10-17 laptop re-verified locally signed deliveries and processing recovery; it did **not** repeat Stripe CLI.
 
 ### Local client acceptance
 
@@ -269,7 +263,7 @@ Details and the things this model does not claim are in [docs/threat-model.md](d
 - No production paging/alerts; retention/partitioning is not production scale.
 - Portfolio network topology tradeoffs apply (local Compose / optional later AWS).
 - Stripe signing secret is process-scoped (one secret per backend process), not per-integration UI-managed.
-- Current GitHub interactive OAuth may still need an operator browser consent step after connect handoff.
+- GitHub OAuth requires a local OAuth App and operator browser consent on each new machine; the 2026-10-17 native-laptop run completed that path (see verification docs).
 - p95 latency is withheld below 20 observations.
 - The Python and Node SDKs are installed from this repository only.
 - `localhost:8080` is your machine. There is no public hosted demo.

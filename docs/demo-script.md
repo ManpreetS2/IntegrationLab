@@ -14,7 +14,7 @@ Screenshots: `docs/assets/final/`. Evidence: `docs/portfolio-evidence.md`.
 2. Overview (20s) — Health from stored evidence; unknown ≠ healthy; Stripe degraded from failed queue.  
 3. Stripe (40s) — Webhooks: signed receipt, duplicate absorbed, failed queue → manual retry story.  
 4. Telemetry (25s) — SDK-reported, not verified; credential rotate/revoke.  
-5. Close (20s) — FastAPI/React/Postgres/CI; AWS Terraform validated not applied; GitHub OAuth design ready, interactive grant optional live.
+5. Close (20s) — FastAPI/React/Postgres/CI; AWS Terraform validated not applied; GitHub OAuth completed against github.com including revoke→reconnect.
 
 ---
 

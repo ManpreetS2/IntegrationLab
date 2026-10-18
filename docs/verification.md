@@ -82,34 +82,42 @@ connection.
 | Stripe retry / failed queue / manual retry / one effect | PASS | See `verification-current.md` |
 | Python + Node SDK lifecycle | PASS | Rotate/revoke |
 
-## CURRENT EXTERNAL GITHUB
+## CURRENT EXTERNAL GITHUB (2026-10-17 · native macOS Ledger UI)
 
 | Claim | Result |
 |---|---|
-| Connect redirect + state + PKCE S256 | PASS (local handoff) |
-| Interactive authorize / callback / `/user` / diagnostics / revoke recovery | **BLOCKED** — needs operator consent in browser |
+| Connect redirect + state + PKCE S256 | **PASS** |
+| Interactive authorize / callback / connected identity | **PASS** (`ManpreetS2`) |
+| Check Connection + Diagnostics (real `GET /user`) | **PASS** |
+| Encrypted credential after backend restart | **PASS** |
+| Revoke → real HTTP 401 → `needs_setup` → reconnect → healthy | **PASS** |
 
-Details: `docs/verification-current.md`, `docs/external-acceptance.md`.
+Details: `docs/verification-current.md` (new-laptop section), `docs/external-acceptance.md` Run B.
+
+### Historical GitHub block (2026-10-15 · prior Compose run)
+
+On 2026-10-15, connect handoff + PKCE were verified but interactive authorize/callback/`/user`/revoke recovery were **BLOCKED** (operator consent not completed in that agent run). That dated result remains accurate for that window; it is not the current claim.
 
 ## CURRENT EXTERNAL STRIPE TEST MODE
 
-| Claim | Result |
-|---|---|
-| Stripe CLI listen + signed delivery | **PASS** |
-| `payment_intent.succeeded` / `payment_failed` / `charge.refunded` | **PASS** |
-| Same-event redelivery idempotency | **PASS** (`stripe events resend`) |
+| Claim | Result | Notes |
+|---|---|---|
+| Stripe CLI listen + signed delivery | **PASS** | Earlier laptop / 2026-10-15 environment |
+| `payment_intent.succeeded` / `payment_failed` / `charge.refunded` | **PASS** | Same prior CLI run |
+| Same-event redelivery idempotency | **PASS** | `stripe events resend` (prior CLI run) |
+| Locally signed deliveries + processing recovery | **PASS** | 2026-10-17 laptop; **not** a new Stripe CLI run |
 
 ## CURRENT SDK PYTHON / NODE
 
-Both **PASS** against Compose (see `verification-current.md`).
+Both **PASS** (see `verification-current.md`).
 
 ## CURRENT FAILURE RECOVERY
 
-Stripe processing recovery **PASS**. GitHub credential recovery **BLOCKED**. SDK credential recovery **PASS**.
+Stripe processing recovery **PASS**. GitHub credential recovery **PASS** (2026-10-17). SDK credential recovery **PASS**.
 
 ## HISTORICAL EXTERNAL
 
-Older GitHub OAuth / Stripe sessions and v2 UI recordings may exist under `docs/assets/` and prior verification notes. They do **not** automatically prove the current Ledger UI path. Label them **Historical**.
+Older GitHub OAuth / Stripe sessions and v2 UI recordings may exist under `docs/assets/` and prior verification notes. They do **not** automatically prove the current Ledger UI path. Label them **Historical**. The 2026-10-15 GitHub interactive **BLOCKED** row above is historical for that date.
 
 ## AWS ARCHITECTURE ONLY
 
@@ -117,8 +125,8 @@ Terraform fmt/validate (CI). **ARCHITECTURE VALIDATED — NOT APPLIED.** Do not 
 
 ## Still requires user-controlled steps
 
-- Interactive GitHub OAuth authorize (and optional revoke/reconnect demo)
 - Optional later: `terraform apply` + runtime smoke (explicit cost approval)
+- Recreating GitHub OAuth App credentials on a new machine (operator-local secrets; not committed)
 
 ## Rule for portfolio claims
 
