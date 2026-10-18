@@ -8,13 +8,9 @@ This is a local portfolio application. It is not a hosted monitoring service, an
 
 [![IntegrationLab CI](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/IntegrationLab/actions/workflows/ci.yml)
 
-![IntegrationLab Ledger UI v3 — light overview](docs/assets/final/overview-light.png)
+![IntegrationLab Ledger UI v3 — light overview](design/stage2/overview-light-desktop.png)
 
 *Current local console: Ledger UI v3. Health comes from stored evidence; absent observations are not silently shown as healthy.*
-
-[![Watch the archived IntegrationLab v2 demo](docs/media/integrationlab-v2-thumbnail.png)](docs/media/integrationlab-v2-demo.mp4)
-
-*Historical v2 video (about 86 seconds), recorded before the Ledger UI v3 redesign. It is not a recording of the current interface.* HTTP 200, 429, 500, and timeout rows come from a local fixture. Stripe events in the video are locally signed test-mode deliveries. There is no public hosted demo.
 
 ## The problem
 
@@ -43,9 +39,7 @@ The current interface uses **Ledger**, a restrained, evidence-first design acros
 
 The Ledger redesign uses the existing v2 API contracts and backend health calculations. It does **not** add hosted monitoring, automatic webhook workers, tenant isolation, or upstream verification.
 
-![Ledger v3 — GitHub diagnostics](docs/assets/final/github-diagnostics.png)
-
-![Ledger v3 — Stripe failed-queue recovery](docs/assets/final/stripe-failed-recovery.png)
+![Ledger UI v3 — persisted Stripe failed queue (staged local evidence)](design/stage2/webhooks-light-desktop.png)
 
 ## Universal Monitoring v2
 
@@ -64,7 +58,7 @@ The console shows those rows on **Telemetry**, not on the provider request log.
 
 Switching the selected application hides the previous application's credential prefixes and telemetry until the new response arrives.
 
-![SDK-reported telemetry in Ledger v3](docs/assets/final/telemetry.png)
+![SDK-reported telemetry in Ledger UI v3](design/stage2/telemetry-dark-desktop.png)
 
 ## GitHub and Stripe
 
@@ -78,7 +72,7 @@ Failure Lab, guided diagnostics, GitHub OAuth, and the Stripe webhook receiver a
 
 Ledger UI v3 has warm paper-and-ink light and warm near-black dark appearances. Choose **System**, **Light**, or **Dark** in the console. System follows the operating system, including later changes. The choice is stored in this browser.
 
-![Ledger v3 — dark overview](docs/assets/final/overview-dark.png)
+![Ledger UI v3 — dark overview](design/stage2/overview-dark-desktop.png)
 
 ## Architecture
 
@@ -197,7 +191,9 @@ Use the same environment variables as the Python SDK. `fromEnv()` rejects an ope
 8. Rotate the credential. The previous secret is rejected. Revoke the replacement. Status returns to Registered. The historical rows remain.
 9. Open Requests, Webhooks, Diagnostics, and Support Cases for the GitHub and Stripe records. Those pages are the provider workflows, not the SDK feed.
 
-A shot list for a 60–90 second recording is in [docs/v2-demo-script.md](docs/v2-demo-script.md).
+For a **current Ledger UI v3** walkthrough, use [the 5–7 minute demo script](docs/demo-script.md). A fresh v3 video is not yet published.
+
+**Archived v2 demo (historical):** [Watch the 86-second local demo](docs/media/integrationlab-v2-demo.mp4). It shows an older UI and fixture/signed-local evidence, not the current Ledger interface or a hosted service.
 
 ## Verification
 
@@ -205,7 +201,7 @@ Do not mix these evidence classes. Details: [portfolio-evidence.md](docs/portfol
 
 ### Automated
 
-Backend pytest (367), frontend lint + unit (30) + production build, Python/Node SDK unit tests, six-job GitHub Actions on `main` (backend, frontend quality, both containers, Compose smoke, Terraform validate).
+In the 2026-10-17 acceptance run: backend pytest **367 passed**, frontend **30 unit tests**, lint and production build passed, and both SDK unit suites passed. The latest six-job GitHub Actions run on `main` also passed (backend, frontend, both containers, Compose smoke, Terraform validate).
 
 ### Current external acceptance
 
@@ -229,10 +225,10 @@ Older v2 provider verification and videos remain labeled historical. They do not
 From a checkout with the backend virtualenv and frontend dependencies:
 
 ```bash
-cd backend && python -m pytest -q
-cd frontend && npm run lint && npm run test:unit && npm run build
-cd sdk/python && PYTHONPATH=src python -m pytest tests -q
-cd sdk/typescript && npm test
+(cd backend && python -m pytest -q)
+(cd frontend && npm run lint && npm run test:unit && VITE_API_URL= npm run build)
+(cd sdk/python && PYTHONPATH=src python -m pytest tests -q)
+(cd sdk/typescript && npm test)
 python3 examples/universal-monitoring/accept.py
 ```
 
