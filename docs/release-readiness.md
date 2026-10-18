@@ -1,5 +1,7 @@
 # Release readiness matrix
 
+> **Dated verification snapshot:** this matrix records the 2026-10-17 acceptance run on the former final-polish branch. PR #39 was subsequently merged as `348e747`; PR #40 (Ledger spacing/mobile polish) was subsequently merged as `94f0c6d`. The six-job CI on `94f0c6d` passed. The manual tests below are from their original run; this note does not imply a fresh external acceptance test for PR #40.
+
 Date: 2026-10-17 · Branch: `feat/final-portfolio-polish` · Baseline main: `954ed0960014204bafdfaf607b47f9a7ea5179fa`
 
 | Area | Status | Notes |
