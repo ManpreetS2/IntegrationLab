@@ -1,38 +1,30 @@
-# LinkedIn post draft — IntegrationLab v2
+# LinkedIn launch draft — IntegrationLab (Ledger UI v3)
 
-Not published. Waiting for approval after the integrated pull request is merged.
+**Status:** Ready for a final human read before posting. Pair with current Ledger UI v3 screenshots; the existing v2 video is historical, not the current UI.
 
-I built IntegrationLab to answer a narrower question than "is the integration up?": what did we actually record, and who reported it?
+I built **IntegrationLab** — a self-hosted reliability console for understanding why third-party integrations fail, what the evidence actually proves, and how to recover.
 
-It is a self-hosted console. GitHub OAuth and Stripe webhooks have their own evidence: signed deliveries, duplicate handling, retries, and a failed queue. Failure Lab can reproduce a failure without changing that provider health. A support case pins the evidence to an investigation.
+The most interesting part wasn't making API calls. It was keeping four types of evidence separate: real GitHub provider requests, signed Stripe webhook deliveries, controlled failure simulations, and HTTP outcomes reported by an application's own SDK.
 
-Universal Monitoring v2 adds a different path. A Python or Node SDK, installed from this repo and not published to a package registry, reports sanitized HTTP outcomes from the application itself. The console shows those rows as SDK-reported. It does not call the upstream service to confirm them. Error rate stays unavailable when nothing was reported, and p95 stays unavailable below 20 observations.
+Here's what I built and verified:
 
-The hard part was keeping those evidence types apart, and not storing the ingestion secret after the one time it is shown.
+- **GitHub OAuth:** state + PKCE, encrypted server-side tokens, real `GET /user` diagnostics. I actually revoked IntegrationLab's authorization, observed a real HTTP 401, and reconnected to restore healthy status.
+- **Stripe webhook reliability:** raw-body signature verification, duplicate-event handling, PostgreSQL-backed processing, 1s/2s/4s retries, failed-queue inspection, and manual recovery with one recorded effect. Real Stripe CLI test-mode acceptance was completed on a previous local environment; controlled processing recovery was verified locally.
+- **Python + Node SDKs:** report sanitized HTTP outcomes, with one-time credential reveal, rotation, and revocation. Reports are clearly labeled as client-reported—not independently verified upstream calls.
+- **Operator workflows:** Ledger UI v3, evidence-based diagnostics, support cases, and an audit trail.
 
-Backend pytest, frontend tests, both SDK suites, a sample application, and six GitHub Actions jobs cover the current tree. AWS Terraform is validated in CI and has not been applied.
+The project uses FastAPI, React/TypeScript, PostgreSQL, SQLAlchemy, Alembic, Docker, and six-job GitHub Actions CI. I also defined an AWS architecture in Terraform, **but it has not been deployed**, and this is not a hosted SaaS.
 
-An 86 second recording of the local console is in the repository: docs/media/integrationlab-v2-demo.mp4. The HTTP rows are from the local sample. The Stripe rows are locally signed test-mode events. localhost is not a hosted service.
+The biggest lesson: a system is easier to debug when it tells you **what it knows, how it knows it, and what it doesn't know**.
 
-https://github.com/ManpreetS2/IntegrationLab
+GitHub: https://github.com/ManpreetS2/IntegrationLab
 
 ---
 
-# Earlier draft — IntegrationLab v1
+## Posting notes (do not paste this section into LinkedIn)
 
-I built **IntegrationLab**: a support and reliability console for debugging third-party API and webhook integrations.
-
-When a partner integration breaks, the hard part usually isn’t calling the API — it’s answering what happened, what evidence matters, what the operator already tried, and how to recover without double-applying side effects.
-
-A few engineering choices I’m happy to discuss:
-
-1. **Evidence over vibes** — health is derived from stored provider/webhook evidence; simulations are labeled and excluded from live health.
-2. **Webhook reliability in Postgres** — signature verification on the raw body, delivery dedupe, append-only attempts, bounded retries, failed queue, and effect-level idempotency — without jumping straight to Redis/Kafka.
-3. **Support Cases on top of reliability** — lifecycle, pinned evidence, notes, a derived timeline (`occurred_at` vs pin time), UUID correlation, and an allowlisted operator audit trail (including intent audits before webhook side effects).
-4. **Security hygiene for a portfolio system** — OAuth state + PKCE, encrypted tokens at rest, single-operator bearer gate, and an explicit threat model with honest limitations.
-
-**Lesson:** the most useful “feature” was often the discipline *not* to build something yet — no fake multi-tenant RBAC, no premature distributed tracing, no claiming AWS was deployed until it actually is.
-
-**Stack:** FastAPI · React · PostgreSQL · Docker · GitHub Actions · Terraform (AWS architecture)
-
-GitHub: https://github.com/ManpreetS2/IntegrationLab
+- Use 3–5 current Ledger UI v3 screenshots, preferably from `design/stage2/`. Avoid the older blue UI images from `docs/assets/final/` where their design no longer matches current main.
+- Suggested order: Overview → Stripe failed queue → Telemetry → Support Case or Audit.
+- Don't post the archived v2 demo as a current UI walkthrough.
+- Claims: GitHub real OAuth + revoke/reconnect externally passed on 2026-10-17; Stripe CLI test-mode acceptance passed on an earlier local setup; AWS Terraform validated only; SDK telemetry client-reported only.
+- For shorter project-section copy, use `docs/linkedin-project-description.md`.

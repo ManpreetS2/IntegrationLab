@@ -1,5 +1,7 @@
 # Claim → Evidence Matrix
 
+> **Dated acceptance record:** the test evidence below is from 2026-10-15 to 2026-10-17, before PR #39 and PR #40 were merged. Current `main` advanced to `94f0c6d` (Ledger spacing/mobile fixes), with six-job CI passing. These older acceptance SHA references are intentionally retained for provenance; they are not the current main HEAD.
+
 Governing document for README, resume, and interview wording.
 Date of this run: **2026-10-15** (America/Los_Angeles) / **2026-10-16 UTC**.
 Baseline `main` SHA: `954ed0960014204bafdfaf607b47f9a7ea5179fa`.
