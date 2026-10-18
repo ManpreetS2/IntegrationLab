@@ -10,7 +10,7 @@ This is a local portfolio application. It is not a hosted monitoring service, an
 
 ![IntegrationLab Ledger UI v3 — light overview](design/stage2/overview-light-desktop.png)
 
-*Current local console: Ledger UI v3. Health comes from stored evidence; absent observations are not silently shown as healthy.*
+*Ledger UI v3 shown with staged local demo data (not a live provider-session screenshot). Health comes from stored evidence; absent observations are not silently shown as healthy. Real GitHub OAuth and Stripe test-mode acceptance are documented separately below.*
 
 ## The problem
 
