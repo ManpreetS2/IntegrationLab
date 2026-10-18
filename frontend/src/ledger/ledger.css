@@ -904,6 +904,15 @@ html[data-theme='dark'] .lg-drawer-backdrop {
     gap: 24px;
   }
 
+  /* Reserve scroll room so last content clears the fixed mobile CTA. */
+  .lg-page:has(.lg-mobile-action) {
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  html:has(.lg-mobile-action) {
+    scroll-padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
   .lg-table-wrap {
     display: none;
   }
@@ -921,13 +930,20 @@ html[data-theme='dark'] .lg-drawer-backdrop {
     grid-template-columns: 7.5rem minmax(0, 1fr);
   }
 
+  /*
+   * Fixed (not sticky bottom): sticky bottom floated the CTA over earlier
+   * list content while its parent was on screen. Fixed + page padding keeps
+   * the bar at the viewport bottom without covering rows permanently.
+   */
   .lg-mobile-action {
     display: block;
-    position: sticky;
+    position: fixed;
+    left: 0;
+    right: 0;
     bottom: 0;
     z-index: 5;
-    margin-top: 16px;
-    padding: 12px 0 calc(12px + env(safe-area-inset-bottom, 0px));
+    margin: 0;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
     background: var(--lg-canvas);
     border-top: 1px solid var(--lg-rule);
   }
@@ -935,6 +951,7 @@ html[data-theme='dark'] .lg-drawer-backdrop {
   .lg-mobile-action .lg-case-button {
     width: 100%;
     min-height: 40px;
+    margin-top: 0;
   }
 
   .lg-trail .lg-case-button {
