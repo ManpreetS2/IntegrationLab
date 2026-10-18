@@ -30,7 +30,7 @@ Failure Lab remains a **controlled simulation** of provider failure *shapes*. It
 
 ## Demo B — Stripe internal processing recovery
 
-**Status this run: PASS**
+**Status this run: PASS** (re-verified 2026-10-17 on new laptop with `evt_recovery_demo_laptop`; Stripe CLI external listen not repeated on that machine)
 
 ### Starting state
 

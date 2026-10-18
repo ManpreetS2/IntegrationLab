@@ -31,6 +31,19 @@ Never promote **BLOCKED** or mocked tests to **PASS**.
 
 Secrets stay in local `.env` only.
 
+### Follow-up: new laptop (2026-10-17)
+
+See **New-laptop recovery re-verification** in [`verification-current.md`](verification-current.md).
+
+| Item | Value |
+|------|-------|
+| Date | 2026-10-17 |
+| Starting commit | `388c3357a1b6b344c0a0c2a0e27addb052bfe0b9` (PR #39 head) |
+| Stack | Native Postgres 18 + uvicorn + Vite `:8080` proxy (Docker Desktop blocked: revoked signing cert) |
+| GitHub interactive OAuth | **BLOCKED** (no local OAuth App credentials yet) |
+| Stripe CLI rerun | **NOT RUN** (CLI absent); prior CLI PASS retained |
+| Locally signed Stripe + processing recovery | **PASS** on this machine |
+
 ---
 
 ## GitHub external acceptance

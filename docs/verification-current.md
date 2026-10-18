@@ -136,3 +136,88 @@ Build `@integrationlab/sdk` → ingest (`accepted=2`) → revoke (`http_401`) �
 ## Screenshots
 
 See `docs/assets/final/` (overview light/dark live; other Ledger pages from current Ledger UI v3 capture set / stage2 refresh).
+
+---
+
+## New-laptop recovery re-verification (2026-10-17)
+
+**Date:** 2026-10-17 (America/Los_Angeles)  
+**Branch / head at start:** `feat/final-portfolio-polish` @ `388c3357a1b6b344c0a0c2a0e27addb052bfe0b9`  
+**Machine:** macOS arm64 (Darwin 27.0.1), user account distinct from prior laptop  
+**Stack used:** Native (project-local PostgreSQL 18 via micromamba + FastAPI uvicorn + Vite on `:8080` with same-origin proxy). Docker Desktop is installed but **cannot launch** (`CSSMERR_TP_CERT_REVOKED` / launchd error 163). Compose `make demo` was **not** runnable on this machine until Docker is reinstalled/updated.  
+**Callback configured for:** `http://localhost:8080/api/oauth/github/callback`  
+**Secrets:** operator key, Fernet key, and local Stripe signing secret only in gitignored `.env` / `.tools/` (never committed).
+
+### Automated (this machine)
+
+| Gate | Result |
+| --- | --- |
+| `pytest` (backend/) | **367 passed** |
+| Python SDK unit tests | **10 passed** |
+| Node SDK unit tests | **10 passed** |
+| `npm run lint` | **PASS** (warnings only) |
+| `npm test:unit` | **30 passed** |
+| `VITE_API_URL= npm run build` | **PASS** |
+| Migration head | `007_universal_telemetry` (upgrade on disposable local DBs) |
+| PR #39 CI (unchanged head `388c335`) | **PASS** (all six jobs) |
+
+### Local boot / operator
+
+| Step | Result |
+| --- | --- |
+| Postgres healthy | **PASS** |
+| `/health` 200 liveness | **PASS** |
+| `/ready` DB reachable | **PASS** |
+| UI `http://127.0.0.1:8080` | **PASS** |
+| `/auth/operator` via UI origin | **PASS** `{"required":true}` |
+| Operator unlock (Bearer) | **PASS** (bad key 401) |
+| Demo GitHub/Stripe + Failure Lab simulated rows | **PASS** (`is_simulated=true`) |
+| Secret non-disclosure (API samples + built JS bundle) | **PASS** |
+
+### GitHub external acceptance (this machine)
+
+| Step | Result |
+| --- | --- |
+| OAuth App credentials in local `.env` | **Absent** at recovery time |
+| Connect without credentials | **503** with safe configuration message (expected) |
+| Interactive authorize / callback / connected identity | **BLOCKED** — needs OAuth App Client ID/secret + operator browser consent |
+| Revoke → recover | **BLOCKED** (depends on connected grant) |
+
+**GITHUB EXTERNAL ACCEPTANCE (2026-10-17 laptop): BLOCKED**
+
+Historical GitHub external rows in `docs/verification.md` remain separate historical evidence. The Oct 15–16 CURRENT Ledger interactive block above is unchanged.
+
+### Stripe (this machine)
+
+| Class | Result |
+| --- | --- |
+| Stripe CLI install / `stripe listen` rerun | **NOT RUN** — Stripe CLI not installed; Homebrew system install blocked (no sudo) |
+| Prior PR #39 Stripe CLI test-mode acceptance | **Preserved** as prior-run external evidence (see matrix above) |
+| Locally signed test-mode deliveries (`payment_intent.succeeded` / `payment_failed` / `charge.refunded`) | **PASS** — HTTP 200, durable rows, process-due → processed |
+| Invalid signature | **PASS** — HTTP 400, no trusted event |
+| Same `evt_…` redelivery | **PASS** — `duplicate:true`, `delivery_count=2`, one `payment_success_recorded` effect |
+| Controlled processing recovery (1s/2s/4s → failed queue → operator retry → one effect) | **PASS** (`evt_recovery_demo_laptop`) |
+
+**STRIPE CLI RERUN (this laptop): NOT RUN**  
+**STRIPE LOCAL SIGNED + RECOVERY (this laptop): PASS**
+
+### SDK / support / audit / DB (this machine)
+
+| Area | Result |
+| --- | --- |
+| Python-shaped ingest via `/api/telemetry/v1/events` | **PASS** (accepted batch; rotate old→401; revoke→401; history retained; secret absent from list) |
+| Support case + Failure Lab / provider_request pins + note + resolve | **PASS** |
+| Reject SDK evidence pin | **PASS** (422 enum) |
+| Audit actions present without secrets | **PASS** |
+| DB stop (volume/data dir kept) → integrations/overview **503**; `/health` still ok → restart → records present | **PASS** (3 integrations, 2 cases after recovery) |
+
+### UI pages
+
+Browser MCP cannot reach host loopback from this agent; Computer Use requires Accessibility/Screen Recording approval. API and same-origin proxy checks cover unlock, overview, integrations, requests, webhooks, failures, support, and audit data paths. Full visual Ledger walkthrough remains for the operator once Computer Use or a local browser session is available.
+
+### Honest non-claims
+
+- AWS Terraform still **not applied**.
+- Docker Compose full stack **not** re-verified on this laptop.
+- GitHub interactive OAuth **not** completed on this laptop.
+- Stripe CLI external listen **not** repeated on this laptop (prior evidence retained).

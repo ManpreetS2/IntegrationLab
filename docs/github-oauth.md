@@ -28,7 +28,7 @@ We are **not** converting the project into a GitHub App here.
 
 1. Open [GitHub Developer Settings → OAuth Apps](https://github.com/settings/developers).
 2. Click **New OAuth App**.
-3. For the **full Compose stack** (`make compose-up`, UI on `:8080`) fill in:
+3. For the **full Compose stack** (`make compose-up`, UI on `:8080`) **or** native Vite with the same-origin proxy on `:8080`, fill in:
    - **Application name:** IntegrationLab Local (or similar)
    - **Homepage URL:** `http://localhost:8080`
    - **Authorization callback URL:** `http://localhost:8080/api/oauth/github/callback`
@@ -36,10 +36,30 @@ We are **not** converting the project into a GitHub App here.
 5. Copy the **Client ID**.
 6. Generate a **Client secret** and copy it once (GitHub shows it only briefly).
 
-For split local dev (Vite `:5173` + API `:8000`), use homepage `http://localhost:5173`
+For split local dev (Vite `:5173` + API `:8000` **without** the Vite proxy), use homepage `http://localhost:5173`
 and callback `http://localhost:8000/api/oauth/github/callback` instead.
 
 Never commit the client secret. Never put it in React or frontend env files.
+
+### New-laptop operator checklist (credentials absent)
+
+If Connect returns **503** with “GitHub OAuth is not configured”:
+
+1. Create or reopen the OAuth App as above (callback **must** match `GITHUB_OAUTH_REDIRECT_URI`).
+2. Put values only in the project-root **gitignored** `.env` (never chat, screenshots, or git):
+
+```bash
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+GITHUB_OAUTH_REDIRECT_URI=http://localhost:8080/api/oauth/github/callback
+FRONTEND_URL=http://localhost:8080
+# TOKEN_ENCRYPTION_KEY must already exist and must not be regenerated if tokens are stored
+```
+
+3. Restart the backend process so it reloads env.
+4. Unlock the console → Integrations → Demo GitHub → **Connect**.
+5. Complete GitHub login/consent in **your** browser.
+6. Confirm return to Ledger with connected identity, then **Check Connection** and Guided Diagnostics (real `/user`, not Failure Lab).
 
 ## Environment variables
 
