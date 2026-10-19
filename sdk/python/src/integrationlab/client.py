@@ -149,6 +149,7 @@ class IntegrationLabClient:
         self._last_error: str | None = None
         self._buffer: list[dict[str, Any]] = []
         self._inflight = False
+        self._closing = False
         self._stop = False
         self._closed = False
         self._cv = threading.Condition()
@@ -228,7 +229,7 @@ class IntegrationLabClient:
             if event is None:
                 self.stats.rejected += 1
                 return False
-            if self._closed or len(self._buffer) >= self._max_queue:
+            if self._closing or self._closed or len(self._buffer) >= self._max_queue:
                 self.stats.dropped += 1
                 return False
             self._buffer.append(event)
@@ -292,15 +293,19 @@ class IntegrationLabClient:
             )
 
     def close(self, *, flush_timeout: float = 5.0) -> FlushResult:
-        """Stop delivery loops, flush what remains, and join the worker."""
+        """Reject new records, flush queued batches, then stop the worker."""
         if self._closed and not self._thread.is_alive():
             return self.flush(timeout=0)
-        # Signal stop before flush so in-flight Retry-After loops abort promptly.
+        # Closing wakes in-flight Retry-After/backoff waits (drop that one batch)
+        # but does not stop the worker from delivering not-yet-attempted batches.
+        with self._cv:
+            self._closing = True
+            self._cv.notify_all()
+        result = self.flush(timeout=flush_timeout)
         with self._cv:
             self._closed = True
             self._stop = True
             self._cv.notify_all()
-        result = self.flush(timeout=flush_timeout)
         self._thread.join(timeout=flush_timeout)
         try:
             atexit.unregister(self._shutdown_from_atexit)
@@ -309,18 +314,18 @@ class IntegrationLabClient:
         return result
 
     def _wait_or_stop(self, seconds: float) -> bool:
-        """Wait ``seconds`` (or until stop/close). Returns True if stopped."""
-        if self._stop or self._closed:
+        """Wait ``seconds`` (or until closing/stop). Returns True if aborted."""
+        if self._closing or self._stop or self._closed:
             return True
         if self._custom_sleep:
             # Injectable sleeper (tests): record the full wait, then re-check stop.
             self._sleep(seconds)
-            return bool(self._stop or self._closed)
+            return bool(self._closing or self._stop or self._closed)
         if seconds <= 0:
             return False
         deadline = time.monotonic() + seconds
         with self._cv:
-            while not self._stop and not self._closed:
+            while not self._closing and not self._stop and not self._closed:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
@@ -334,7 +339,7 @@ class IntegrationLabClient:
         self.close()
 
     def _shutdown_from_atexit(self) -> None:
-        if not self._closed:
+        if not self._closed and not self._closing:
             self.close(flush_timeout=2.0)
 
     def _run(self) -> None:
@@ -363,6 +368,8 @@ class IntegrationLabClient:
         attempt = 0
         rate_limited_attempts = 0
         while attempt < self._max_retries:
+            # Fully stopped workers abort; ``_closing`` still allows delivery of
+            # not-yet-attempted batches (in-flight Retry-After aborts via wait).
             if self._stop or self._closed:
                 break
             try:

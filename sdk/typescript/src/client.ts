@@ -130,6 +130,7 @@ export class IntegrationLabClient {
   private readonly customSleep: boolean;
   private readonly buffer: EventBody[] = [];
   private tail: Promise<void> = Promise.resolve();
+  private closing = false;
   private stopped = false;
   private lastError: string | null = null;
   private activeDelay: { cancel: () => void } | null = null;
@@ -191,7 +192,7 @@ export class IntegrationLabClient {
       this.stats.rejected += 1;
       return false;
     }
-    if (this.stopped || this.buffer.length >= this.maxQueue) {
+    if (this.closing || this.stopped || this.buffer.length >= this.maxQueue) {
       this.stats.dropped += 1;
       return false;
     }
@@ -265,11 +266,15 @@ export class IntegrationLabClient {
   }
 
   async close(timeoutMs = 5000): Promise<FlushResult> {
-    // Signal stop before flush so in-flight Retry-After loops abort promptly.
-    this.stopped = true;
+    // Closing rejects new records and wakes in-flight Retry-After/backoff waits
+    // (drop that one batch) while still draining not-yet-attempted batches.
+    this.closing = true;
     this.activeDelay?.cancel();
     this.activeDelay = null;
-    return this.flush(timeoutMs);
+    this.tail = this.tail.then(() => this.drain()).catch(() => undefined);
+    const result = await this.flush(timeoutMs);
+    this.stopped = true;
+    return result;
   }
 
   private async drain(): Promise<void> {
@@ -286,10 +291,10 @@ export class IntegrationLabClient {
   }
 
   private async waitOrStop(ms: number): Promise<boolean> {
-    if (this.stopped) return true;
+    if (this.closing || this.stopped) return true;
     if (this.customSleep) {
       await this.sleepFn(ms);
-      return this.stopped;
+      return this.closing || this.stopped;
     }
     const handle = delay(ms);
     this.activeDelay = handle;
@@ -298,13 +303,15 @@ export class IntegrationLabClient {
     } finally {
       if (this.activeDelay === handle) this.activeDelay = null;
     }
-    return this.stopped;
+    return this.closing || this.stopped;
   }
 
   private async deliver(batch: EventBody[]): Promise<void> {
     let attempt = 0;
     let rateLimitedAttempts = 0;
     while (attempt < this.maxRetries) {
+      // Fully stopped clients abort; ``closing`` still allows delivery of
+      // not-yet-attempted batches (in-flight Retry-After aborts via waitOrStop).
       if (this.stopped) break;
       try {
         const response = await this.transport(

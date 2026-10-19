@@ -467,6 +467,97 @@ def test_config_rejects_operator_key_and_loads_env() -> None:
     assert transport.calls
 
 
+def test_close_flushes_multi_batch_queue() -> None:
+    batch_sizes: list[int] = []
+
+    def accept_all(_url, body, _headers, _timeout):
+        n = len(json.loads(body.decode("utf-8"))["events"])
+        batch_sizes.append(n)
+        return 200, json.dumps({"accepted": n, "duplicates": 0, "results": []}).encode(), {}
+
+    transport = Transport(accept_all)
+    lab = IntegrationLabClient(
+        base_url="http://127.0.0.1:8010",
+        integration_id=INTEGRATION_ID,
+        credential=CREDENTIAL,
+        batch_size=10,
+        timeout_seconds=0.2,
+        max_retries=3,
+        retry_backoff_seconds=0,
+        transport=transport,
+    )
+    try:
+        for _ in range(25):
+            assert lab.record_http(
+                service="orders-api",
+                method="GET",
+                route_template="/health",
+                status_code=200,
+                duration_ms=1,
+            )
+        result = lab.close(flush_timeout=5)
+        assert result.accepted == 25
+        assert result.dropped == 0
+        assert lab.stats.dropped == 0
+        assert result.delivered is True
+        assert batch_sizes == [10, 10, 5]
+    finally:
+        lab.close(flush_timeout=1)
+
+
+def test_context_manager_delivers_queued_event() -> None:
+    transport = Transport(_ok)
+    with IntegrationLabClient(
+        base_url="http://127.0.0.1:8010",
+        integration_id=INTEGRATION_ID,
+        credential=CREDENTIAL,
+        timeout_seconds=0.2,
+        max_retries=3,
+        retry_backoff_seconds=0,
+        transport=transport,
+    ) as lab:
+        assert lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+    assert transport.calls
+    assert lab.stats.accepted == 1
+    assert lab.stats.dropped == 0
+
+
+def test_close_during_retry_after_returns_promptly() -> None:
+    state = {"n": 0}
+
+    def always_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        return 429, b"", {"Retry-After": "60"}
+
+    transport = Transport(always_limited)
+    lab = _client(transport)
+    try:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        deadline = time.time() + 2
+        while state["n"] < 1 and time.time() < deadline:
+            time.sleep(0.01)
+        assert state["n"] >= 1
+        started = time.monotonic()
+        lab.close(flush_timeout=2)
+        elapsed = time.monotonic() - started
+        assert elapsed < 2.0
+        assert lab.stats.dropped >= 1
+    finally:
+        lab.close(flush_timeout=1)
+
+
 def test_plain_http_remote_emits_one_warning() -> None:
     transport = Transport(_ok)
     with pytest.warns(UserWarning, match="plain HTTP"):

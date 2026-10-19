@@ -506,6 +506,59 @@ test("delivers to a local HTTP server and preserves the upstream result", async 
   }
 });
 
+test("close flushes a multi-batch queue", async () => {
+  const calls = [];
+  const lab = client(
+    async (url, body) => {
+      const n = JSON.parse(body).events.length;
+      calls.push(n);
+      return {
+        status: 200,
+        body: JSON.stringify({ accepted: n, duplicates: 0, results: [] }),
+      };
+    },
+    { batchSize: 10 },
+  );
+  for (let i = 0; i < 25; i += 1) {
+    assert.equal(
+      lab.recordHttp({
+        service: "orders-api",
+        method: "GET",
+        routeTemplate: "/health",
+        statusCode: 200,
+        durationMs: 1,
+      }),
+      true,
+    );
+  }
+  const result = await lab.close(5000);
+  assert.equal(result.accepted, 25);
+  assert.equal(result.dropped, 0);
+  assert.equal(lab.stats.dropped, 0);
+  assert.equal(result.delivered, true);
+  assert.deepEqual(calls, [10, 10, 5]);
+});
+
+test("close during Retry-After returns promptly", async () => {
+  let calls = 0;
+  const lab = client(async () => {
+    calls += 1;
+    return { status: 429, body: "", headers: { "Retry-After": "60" } };
+  });
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  await waitFor(() => calls >= 1);
+  const started = Date.now();
+  await lab.close(2000);
+  assert.ok(Date.now() - started < 2000);
+  assert.ok(lab.stats.dropped >= 1);
+});
+
 test("warns once for plain HTTP to a non-loopback host", () => {
   const messages = [];
   const original = console.warn;
