@@ -4,6 +4,7 @@ import {
   getGitHubConnection,
   startGitHubConnect,
 } from '../api'
+import { errorMessage } from '../hooks'
 import type { GitHubConnection, Integration } from '../types'
 
 interface GitHubConnectionPanelProps {
@@ -37,7 +38,7 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
       .catch((err) => {
         if (!cancelled) {
           setProfile(null)
-          setError(err instanceof Error ? err.message : 'Failed to load GitHub profile.')
+          setError(errorMessage(err, 'Failed to load GitHub profile.'))
         }
       })
       .finally(() => {
@@ -56,7 +57,7 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
       const { authorize_url } = await startGitHubConnect(integration.id)
       window.location.assign(authorize_url)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start GitHub connect.')
+      setError(errorMessage(err, 'Failed to start GitHub connect.'))
       setConnecting(false)
     }
   }
@@ -81,7 +82,7 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Connection check failed.')
+      setError(errorMessage(err, 'Connection check failed.'))
     } finally {
       setChecking(false)
     }

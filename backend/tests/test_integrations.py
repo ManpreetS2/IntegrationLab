@@ -97,3 +97,14 @@ def test_isolation_does_not_leak_prior_test_rows(client) -> None:
     response = client.get("/api/integrations")
     assert response.status_code == 200
     assert len(response.json()) == 2
+
+
+def test_patch_integration_rejects_blank_or_null_name(client) -> None:
+    integration_id = client.get("/api/integrations").json()[0]["id"]
+    assert client.patch(f"/api/integrations/{integration_id}", json={"name": "   "}).status_code == 422
+    assert client.patch(f"/api/integrations/{integration_id}", json={"name": None}).status_code == 422
+
+
+def test_patch_integration_rejects_null_environment(client) -> None:
+    integration_id = client.get("/api/integrations").json()[0]["id"]
+    assert client.patch(f"/api/integrations/{integration_id}", json={"environment": None}).status_code == 422

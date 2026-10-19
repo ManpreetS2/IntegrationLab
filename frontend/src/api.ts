@@ -72,35 +72,8 @@ export function apiOrigin(): string {
   return ''
 }
 
-/** Non-2xx response from the API. `message` keeps the raw detail text for existing callers. */
-export function explainApiError(error: unknown, fallback: string): string {
-  if (!(error instanceof ApiError)) {
-    return error instanceof Error ? error.message : fallback
-  }
-  const raw = error.message.trim()
-  if (!raw) return fallback
-  try {
-    const body = JSON.parse(raw) as { detail?: unknown }
-    if (typeof body.detail === 'string') return body.detail
-    if (body.detail && typeof body.detail === 'object' && 'message' in body.detail) {
-      const message = (body.detail as { message?: unknown }).message
-      if (typeof message === 'string') return message
-    }
-  } catch {
-    return raw
-  }
-  return raw
-}
-
-export class ApiError extends Error {
-  readonly status: number
-
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-  }
-}
+export { ApiError, explainApiError } from './lib/apiError'
+import { ApiError } from './lib/apiError'
 
 function toQuery(params: Record<string, string | number | boolean | undefined | null>): string {
   const search = new URLSearchParams()

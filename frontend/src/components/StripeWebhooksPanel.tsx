@@ -14,6 +14,7 @@ import EvidenceTrail from './ledger/EvidenceTrail'
 import LedgerList, { LedgerFilters } from './ledger/LedgerList'
 import { formatStripeAmount } from '../lib/stripeAmount'
 import { formatTime } from '../format'
+import { errorMessage } from '../hooks'
 import { shorten, webhookFinding } from '../ledger/copy'
 import type {
   Integration,
@@ -58,7 +59,7 @@ async function loadSnapshot(status: WebhookProcessingStatus | ''): Promise<Webho
 }
 
 function loadErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : 'Failed to load webhook events.'
+  return errorMessage(err, 'Failed to load webhook events.')
 }
 
 function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
@@ -108,7 +109,7 @@ function StripeWebhooksPanel({ integrations }: StripeWebhooksPanelProps) {
       setNotice(await action())
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Action failed.')
+      setError(errorMessage(err, 'Action failed.'))
     } finally {
       setBusy(false)
     }
