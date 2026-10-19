@@ -27,24 +27,57 @@ logger = logging.getLogger(__name__)
 PROVIDER = IntegrationProvider.STRIPE.value
 
 
-def _per_refund_amount_cents(data: dict[str, Any], charge: dict[str, Any]) -> int | None:
-    """Cents refunded in *this* event, not the charge's cumulative ``amount_refunded``.
+def _int_cents(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
-    Stripe's charge object carries a running total. When ``data.previous_attributes``
-    includes the prior ``amount_refunded``, the delta is this refund's amount.
+
+def _newest_refund_amount_cents(charge: dict[str, Any]) -> int | None:
+    """Prefer the newest refund object on the charge (Stripe lists newest first)."""
+    refunds = charge.get("refunds")
+    if not isinstance(refunds, dict):
+        return None
+    entries = refunds.get("data")
+    if not isinstance(entries, list) or not entries:
+        return None
+    newest: dict[str, Any] | None = None
+    newest_created = -1
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        created = entry.get("created")
+        created_i = created if isinstance(created, int) and not isinstance(created, bool) else -1
+        if newest is None or created_i >= newest_created:
+            newest = entry
+            newest_created = created_i
+    if newest is None:
+        return None
+    return _int_cents(newest.get("amount"))
+
+
+def _per_refund_amount_cents(data: dict[str, Any], charge: dict[str, Any]) -> int | None:
+    """Cents refunded in *this* event, not merely the charge's cumulative total.
+
+    Preference order:
+    1. Delta from ``data.previous_attributes.amount_refunded`` when present
+       (typical on ``*.updated``; uncommon on ``charge.refunded``).
+    2. Newest refund object's ``amount`` under ``charge.refunds.data``.
+    3. ``charge.amount_refunded`` when no prior refund is known (first refund /
+       realistic ``charge.refunded`` payloads without ``previous_attributes``).
     """
-    current = charge.get("amount_refunded")
-    if not isinstance(current, int) or isinstance(current, bool):
-        return None
+    current = _int_cents(charge.get("amount_refunded"))
     previous_attrs = data.get("previous_attributes")
-    if not isinstance(previous_attrs, dict):
-        return None
-    previous = previous_attrs.get("amount_refunded")
-    if not isinstance(previous, int) or isinstance(previous, bool):
-        return None
-    if current < previous:
-        return None
-    return current - previous
+    if isinstance(previous_attrs, dict):
+        previous = _int_cents(previous_attrs.get("amount_refunded"))
+        if current is not None and previous is not None and current >= previous:
+            return current - previous
+
+    newest = _newest_refund_amount_cents(charge)
+    if newest is not None:
+        return newest
+
+    return current
 
 
 def _str_or_none(value: Any, max_len: int = 255) -> str | None:

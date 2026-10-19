@@ -23,7 +23,31 @@ def test_charge_refunded_uses_per_event_delta() -> None:
     assert normalized.amount == 1000
 
 
-def test_charge_refunded_without_previous_attributes_has_no_amount() -> None:
+def test_charge_refunded_without_previous_attributes_uses_newest_refund() -> None:
+    """Realistic charge.refunded payloads omit previous_attributes (*.updated only)."""
+    event = make_event(
+        "charge.refunded",
+        object_id="ch_1",
+        extra_object={
+            "object": "charge",
+            "amount": 5000,
+            "amount_refunded": 1500,
+            "refunds": {
+                "object": "list",
+                "data": [
+                    {"id": "re_new", "object": "refund", "amount": 500, "created": 1_700_000_100},
+                    {"id": "re_old", "object": "refund", "amount": 1000, "created": 1_700_000_000},
+                ],
+            },
+        },
+    )
+
+    normalized = normalize_stripe_event(event)
+
+    assert normalized.amount == 500
+
+
+def test_charge_refunded_falls_back_to_amount_refunded_when_no_refund_list() -> None:
     event = make_event(
         "charge.refunded",
         object_id="ch_1",
@@ -32,7 +56,7 @@ def test_charge_refunded_without_previous_attributes_has_no_amount() -> None:
 
     normalized = normalize_stripe_event(event)
 
-    assert normalized.amount is None
+    assert normalized.amount == 2000
 
 
 def test_two_partial_refunds_store_per_event_amounts(
