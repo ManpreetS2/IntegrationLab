@@ -277,6 +277,46 @@ def test_stale_processing_with_exhausted_budget_fails(db_session, stripe_integra
     assert row.last_error_code == "webhook_processing_abandoned"
 
 
+def test_late_original_worker_failure_does_not_unprocess_stale_reclaim(
+    db_session, stripe_integration_id
+):
+    """A worker that times out after a stale reclaim must not overwrite PROCESSED.
+
+    Timeline: worker A claims, hangs past STALE_PROCESSING_AFTER; worker B
+    reclaims and finishes successfully; A then reports a handler failure.
+    The effect and processed status from B must remain intact.
+    """
+    event = store_event(db_session, stripe_integration_id, now=T0)
+    processor = StripeWebhookProcessor()
+    claimed = processor._claim(db_session, event.id, now=T0, manual=False)
+    assert isinstance(claimed, tuple)
+    _event_a, attempt_a_id = claimed
+
+    recovered = processor.process_due(db_session, now=T0 + timedelta(minutes=10))
+    assert recovered.processed == 1
+    assert _reload(db_session, event.id).processing_status == "processed"
+    assert len(_effects(db_session, event.id)) == 1
+
+    late = processor._finish_failure(
+        db_session,
+        event.id,
+        attempt_a_id,
+        code="webhook_processing_error",
+        message="Original worker woke up after reclaim.",
+        retryable=True,
+        now=T0 + timedelta(minutes=11),
+    )
+
+    row = _reload(db_session, event.id)
+    assert late.outcome == ProcessOutcome.SKIPPED
+    assert row.processing_status == "processed"
+    assert row.processed_at is not None
+    assert len(_effects(db_session, event.id)) == 1
+    attempts = webhook_attempt_repository.list_for_event(db_session, event.id)
+    assert [a.outcome for a in attempts] == ["abandoned", "succeeded"]
+    assert attempts[0].id == attempt_a_id
+
+
 def test_event_ordering_is_not_assumed(db_session, stripe_integration_id):
     """A refund can arrive before the payment success; each is handled independently."""
     refund = store_event(
