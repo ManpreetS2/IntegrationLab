@@ -27,6 +27,26 @@ logger = logging.getLogger(__name__)
 PROVIDER = IntegrationProvider.STRIPE.value
 
 
+def _per_refund_amount_cents(data: dict[str, Any], charge: dict[str, Any]) -> int | None:
+    """Cents refunded in *this* event, not the charge's cumulative ``amount_refunded``.
+
+    Stripe's charge object carries a running total. When ``data.previous_attributes``
+    includes the prior ``amount_refunded``, the delta is this refund's amount.
+    """
+    current = charge.get("amount_refunded")
+    if not isinstance(current, int) or isinstance(current, bool):
+        return None
+    previous_attrs = data.get("previous_attributes")
+    if not isinstance(previous_attrs, dict):
+        return None
+    previous = previous_attrs.get("amount_refunded")
+    if not isinstance(previous, int) or isinstance(previous, bool):
+        return None
+    if current < previous:
+        return None
+    return current - previous
+
+
 def _str_or_none(value: Any, max_len: int = 255) -> str | None:
     if isinstance(value, str) and value:
         return value[:max_len]
@@ -48,8 +68,8 @@ def normalize_stripe_event(event: dict[str, Any]) -> NormalizedWebhookEvent:
     obj = obj if isinstance(obj, dict) else {}
 
     amount_value = obj.get("amount")
-    if event_type == "charge.refunded" and isinstance(obj.get("amount_refunded"), int):
-        amount_value = obj.get("amount_refunded")
+    if event_type == "charge.refunded":
+        amount_value = _per_refund_amount_cents(data if isinstance(data, dict) else {}, obj)
     amount = amount_value if isinstance(amount_value, int) and not isinstance(amount_value, bool) else None
 
     created = event.get("created")

@@ -83,8 +83,12 @@ failure — the delivery was genuine.
 ## What is stored (and what is not)
 
 Stored per event: Stripe event id, type, `data.object.id`, `api_version`,
-`livemode`, `created`, `amount` (or `amount_refunded` for refunds), `currency`,
-plus processing state.
+`livemode`, `created`, `amount`, `currency`, plus processing state.
+
+For `charge.refunded`, `amount` is the **per-event** refund in cents when
+Stripe includes `data.previous_attributes.amount_refunded` (current cumulative
+minus previous). The charge object's `amount_refunded` alone is a **running
+total** on the charge and is not stored as `amount` without that delta.
 
 Never stored or logged: the raw body, the `Stripe-Signature` header, the
 webhook secret, customer objects, emails, payment method / card details,
