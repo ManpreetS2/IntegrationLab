@@ -8,14 +8,23 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.services.telemetry_limits import MAX_BODY_BYTES
 
 _INGEST_PATH = "/api/telemetry/v1/events"
+_STRIPE_WEBHOOK_PATH_PREFIX = "/webhooks/stripe/"
+STRIPE_WEBHOOK_MAX_BODY_BYTES = 64 * 1024
+
+
+def _body_limit_for_path(path: str) -> int | None:
+    if path == _INGEST_PATH:
+        return MAX_BODY_BYTES
+    if path.startswith(_STRIPE_WEBHOOK_PATH_PREFIX):
+        return STRIPE_WEBHOOK_MAX_BODY_BYTES
+    return None
 
 
 class TelemetryBodyLimitMiddleware:
-    """Buffer POST /api/telemetry/v1/events up to the contract byte limit."""
+    """Buffer selected POST routes up to a per-path byte limit."""
 
-    def __init__(self, app: ASGIApp, max_bytes: int = MAX_BODY_BYTES) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self.max_bytes = max_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -23,7 +32,8 @@ class TelemetryBodyLimitMiddleware:
             return
         path = str(scope.get("path") or "")
         method = str(scope.get("method") or "GET").upper()
-        if method != "POST" or path != _INGEST_PATH:
+        max_bytes = _body_limit_for_path(path) if method == "POST" else None
+        if max_bytes is None:
             await self.app(scope, receive, send)
             return
 
@@ -31,13 +41,13 @@ class TelemetryBodyLimitMiddleware:
         if declared == "invalid":
             await _json(scope, receive, send, 400, "Invalid Content-Length")
             return
-        if isinstance(declared, int) and declared > self.max_bytes:
+        if isinstance(declared, int) and declared > max_bytes:
             await _json(
                 scope,
                 receive,
                 send,
                 413,
-                f"Telemetry request body exceeds {self.max_bytes} bytes",
+                f"Request body exceeds {max_bytes} bytes",
             )
             return
 
@@ -45,16 +55,16 @@ class TelemetryBodyLimitMiddleware:
         while True:
             message = await receive()
             if message["type"] != "http.request":
-                await _json(scope, receive, send, 400, "Incomplete telemetry request")
+                await _json(scope, receive, send, 400, "Incomplete request body")
                 return
             body.extend(message.get("body", b""))
-            if len(body) > self.max_bytes:
+            if len(body) > max_bytes:
                 await _json(
                     scope,
                     receive,
                     send,
                     413,
-                    f"Telemetry request body exceeds {self.max_bytes} bytes",
+                    f"Request body exceeds {max_bytes} bytes",
                 )
                 return
             if not message.get("more_body", False):
