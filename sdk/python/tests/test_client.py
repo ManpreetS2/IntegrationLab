@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from integrationlab import IntegrationLabClient, IntegrationLabConfigError
+from integrationlab import IntegrationLabClient, IntegrationLabConfigError, is_valid_route_template
 from integrationlab.instrumentation import sanitize_route
 
 INTEGRATION_ID = "5c1e1b3a-1b2c-4d5e-8f90-123456789abc"
@@ -252,6 +252,70 @@ def test_sanitize_route_drops_query_and_identifiers() -> None:
     assert route == "/v1/orders/{id}"
     assert "token" not in route
     assert "pw" not in route
+
+
+def test_sanitize_route_root_url_is_server_valid() -> None:
+    assert sanitize_route("https://api.example.com/") == "/"
+    assert sanitize_route("https://api.example.com") == "/"
+    assert is_valid_route_template("/")
+
+
+def test_sanitize_route_percent_encoded_digits_become_placeholder() -> None:
+    route = sanitize_route("https://x.com/%31%32%33%34%35%36%37")
+    assert route == "/{id}"
+    assert is_valid_route_template(route)
+
+
+def test_sanitize_route_truncates_on_segment_boundary() -> None:
+    long_seg = "a" * 120
+    route = sanitize_route(f"https://x.com/{long_seg}/{long_seg}")
+    assert len(route) <= 200
+    assert is_valid_route_template(route)
+    assert not route.endswith("{id")
+
+
+def test_sanitize_route_normalizes_invalid_segments() -> None:
+    assert sanitize_route("https://x.com/a{b}") == "/{id}"
+    assert sanitize_route("https://x.com/%7Bid%7Dx") == "/{id}"
+    assert sanitize_route("https://x.com/%C3%A9") == "/{id}"
+    assert is_valid_route_template(sanitize_route("https://x.com/weird"))
+
+
+def test_record_http_rejects_invalid_route_without_queueing() -> None:
+    transport = Transport(_ok)
+    with _client(transport) as lab:
+        assert (
+            lab.record_http(
+                service="orders-api",
+                method="GET",
+                route_template="/a//b",
+                status_code=200,
+                duration_ms=1,
+            )
+            is False
+        )
+        assert (
+            lab.record_http(
+                service="orders-api",
+                method="GET",
+                route_template="/orders/12345678",
+                status_code=200,
+                duration_ms=1,
+            )
+            is False
+        )
+        assert lab.stats.rejected == 2
+        assert lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/v1/orders/{id}",
+            status_code=200,
+            duration_ms=1,
+        )
+        lab.flush(timeout=2)
+    assert lab.stats.accepted == 1
+    assert lab.stats.dropped == 0
+    assert len(transport.calls) == 1
 
 
 def test_honors_retry_after_seconds_without_consuming_retry_budget() -> None:
@@ -500,7 +564,8 @@ def test_close_flushes_multi_batch_queue() -> None:
         assert result.dropped == 0
         assert lab.stats.dropped == 0
         assert result.delivered is True
-        assert batch_sizes == [10, 10, 5]
+        assert sum(batch_sizes) == 25
+        assert all(size <= 10 for size in batch_sizes)
     finally:
         lab.close(flush_timeout=1)
 

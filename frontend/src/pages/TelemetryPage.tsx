@@ -8,6 +8,7 @@ import SupportCaseDrawer from '../components/ledger/SupportCaseDrawer'
 import SectionStatus from '../components/SectionStatus'
 import { formatErrorRate, formatMs, formatP95, formatTime } from '../format'
 import { navigate, pageHref, useResource } from '../hooks'
+import { popPreviousCursor, pushNextCursor } from '../lib/telemetryPager'
 import { draftFromTelemetry, type CaseDraft } from '../ledger/case'
 import { telemetryFinding } from '../ledger/copy'
 import { marksFromTelemetry } from '../ledger/sequence'
@@ -318,9 +319,9 @@ function TelemetryPage({
               className="secondary-button"
               disabled={previousCursors.length === 0}
               onClick={() => {
-                const prior = previousCursors.slice(0, -1)
+                const { previousCursors: prior, cursor: prev } = popPreviousCursor(previousCursors)
                 setPreviousCursors(prior)
-                setCursor(prior.at(-1))
+                setCursor(prev)
               }}
             >
               Previous
@@ -331,7 +332,7 @@ function TelemetryPage({
               disabled={!page?.next_cursor}
               onClick={() => {
                 if (!page?.next_cursor) return
-                setPreviousCursors((items) => [...items, cursor])
+                setPreviousCursors((items) => pushNextCursor(items, cursor))
                 setCursor(page.next_cursor ?? undefined)
               }}
             >

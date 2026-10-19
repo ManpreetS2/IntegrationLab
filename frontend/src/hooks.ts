@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { ApiError } from './api'
+import { ApiError, explainApiError } from './lib/apiError.ts'
 
 export type Page =
   | 'overview'
@@ -114,6 +114,7 @@ export function navigate(page: Page, params?: Record<string, string>): void {
 export function errorMessage(err: unknown, fallback = 'Request failed.'): string {
   if (err instanceof ApiError && err.status === 503) return 'Database unavailable.'
   if (err instanceof TypeError) return 'Backend unreachable. Is the API running?'
+  if (err instanceof ApiError) return explainApiError(err, fallback)
   return err instanceof Error ? err.message : fallback
 }
 

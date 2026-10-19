@@ -276,6 +276,30 @@ def test_ingest_rejects_malformed_events_without_storing_or_echoing(client, db_s
     assert db_session.query(TelemetryEventORM).count() == 0
 
 
+def test_ingest_422_identifies_bad_event_index_in_batch(client, db_session) -> None:
+    """All-or-nothing batch: valid peers are not stored; loc names the bad index."""
+    created = create_instrumented(client)
+    issued = create_credential(client, created["id"])
+    good = sample_event(created["id"])
+    bad = sample_event(created["id"], route_template="/v1/orders/12345678")
+    response = ingest(client, issued["credential"], [good, bad])
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["message"] == "Invalid telemetry payload"
+    locs = [tuple(err["loc"]) for err in detail["errors"]]
+    assert any(loc[:3] == ("events", "1", "route_template") for loc in locs)
+    assert db_session.query(TelemetryEventORM).count() == 0
+
+
+def test_ingest_accepts_root_route_template(client, db_session) -> None:
+    created = create_instrumented(client)
+    issued = create_credential(client, created["id"])
+    event = sample_event(created["id"], route_template="/")
+    response = ingest(client, issued["credential"], [event])
+    assert response.status_code == 200, response.text
+    assert db_session.query(TelemetryEventORM).count() == 1
+
+
 def test_ingest_rejects_timestamp_skew_and_cross_integration(client, db_session) -> None:
     first = create_instrumented(client, name="One")
     second = create_instrumented(client, name="Two")

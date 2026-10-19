@@ -12,6 +12,7 @@ import type {
   FailureScenarioInfo,
   Integration,
 } from '../types'
+import { errorMessage } from '../hooks'
 
 interface FailureLabPanelProps {
   integrations: Integration[]
@@ -39,7 +40,7 @@ function FailureLabPanel({ integrations, onCompleted }: FailureLabPanelProps) {
         if (items[0]) setScenario(items[0].id)
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to load scenarios.')
+        setError(errorMessage(err, 'Failed to load scenarios.'))
       })
   }, [])
 
@@ -77,7 +78,7 @@ function FailureLabPanel({ integrations, onCompleted }: FailureLabPanelProps) {
       await refreshHistory()
       await onCompleted()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Simulation failed.')
+      setError(errorMessage(err, 'Simulation failed.'))
     } finally {
       setRunning(false)
     }
@@ -88,7 +89,7 @@ function FailureLabPanel({ integrations, onCompleted }: FailureLabPanelProps) {
     try {
       setResult(await getFailureRun(runId))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load run.')
+      setError(errorMessage(err, 'Failed to load run.'))
     }
   }
 

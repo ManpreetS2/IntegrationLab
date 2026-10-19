@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.support import Environment
 
@@ -99,13 +99,29 @@ class IntegrationUpdate(BaseModel):
     expected_traffic: Optional[str] = Field(default=None, max_length=255)
     last_verified_at: Optional[datetime] = None
 
-    @field_validator("name", "owner_team", "escalation_contact", "expected_traffic", "runbook_url")
+    @field_validator("owner_team", "escalation_contact", "expected_traffic", "runbook_url")
     @classmethod
     def strip_optional(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         normalized = value.strip()
         return normalized or None
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def reject_blank_required_fields(self) -> "IntegrationUpdate":
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("name must not be blank")
+        if "environment" in self.model_fields_set and self.environment is None:
+            raise ValueError("environment must be set")
+        return self
 
 
 class Integration(BaseModel):

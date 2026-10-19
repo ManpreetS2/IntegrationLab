@@ -101,7 +101,6 @@ class SupportCaseUpdate(BaseModel):
     resolution_summary: Optional[str] = Field(default=None, max_length=4000)
 
     @field_validator(
-        "title",
         "owner",
         "impact_summary",
         "suspected_cause",
@@ -112,6 +111,17 @@ class SupportCaseUpdate(BaseModel):
     @classmethod
     def normalize_optional(cls, value: Optional[str]) -> Optional[str]:
         return _strip_optional(value)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: Optional[str]) -> Optional[str]:
+        return _strip_optional(value)
+
+    @model_validator(mode="after")
+    def reject_blank_title(self) -> "SupportCaseUpdate":
+        if "title" in self.model_fields_set and self.title is None:
+            raise ValueError("title must not be blank")
+        return self
 
 
 class SupportCaseNoteCreate(BaseModel):

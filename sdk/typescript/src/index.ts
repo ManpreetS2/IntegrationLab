@@ -10,6 +10,7 @@ export {
   MAX_RETRY_AFTER_MS,
   MIN_RETRY_AFTER_MS,
   categoryForStatus,
+  isValidRouteTemplate,
   parseRetryAfterMs,
   sanitizeRoute,
 } from "./client.js";

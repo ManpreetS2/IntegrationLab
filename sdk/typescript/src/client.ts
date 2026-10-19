@@ -370,6 +370,80 @@ export function categoryForStatus(statusCode: number): string | null | undefined
   return undefined;
 }
 
+const ROUTE_PLACEHOLDER = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
+const ROUTE_LITERAL = /^[A-Za-z0-9._~!$&'()*+,;=-]{1,64}$/;
+const ROUTE_UUID =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const ROUTE_LONG_HEX = /^[0-9a-fA-F]{16,}$/;
+const ROUTE_FORBIDDEN = /[ ?#\\@%]/;
+
+/** True when value matches the server's ``validate_route_template`` rules. */
+export function isValidRouteTemplate(value: string): boolean {
+  if (!value.startsWith("/") || value.length > 200) return false;
+  if (ROUTE_FORBIDDEN.test(value) || value.includes("://") || value.includes("//")) return false;
+  if (value === "/") return true;
+  const segments = value.split("/").slice(1);
+  if (segments.length === 0 || segments.some((segment) => segment === "")) return false;
+  for (const segment of segments) {
+    if (segment.startsWith("{") || segment.endsWith("}")) {
+      if (!(segment.startsWith("{") && segment.endsWith("}"))) return false;
+      if (!ROUTE_PLACEHOLDER.test(segment.slice(1, -1))) return false;
+      continue;
+    }
+    if (segment === "." || segment === "..") return false;
+    const identifierShaped =
+      ROUTE_UUID.test(segment) ||
+      ROUTE_LONG_HEX.test(segment) ||
+      (/^\d+$/.test(segment) && segment.length > 6);
+    if (!ROUTE_LITERAL.test(segment) || identifierShaped) return false;
+  }
+  return true;
+}
+
+const ROUTE_LITERAL_CHAR = /[A-Za-z0-9._~!$&'()*+,;=-]/;
+const MAX_ROUTE_LEN = 200;
+const FALLBACK_ROUTE = "/{path}";
+
+function normalizeSegment(raw: string): string {
+  let segment = raw;
+  try {
+    segment = decodeURIComponent(raw);
+  } catch {
+    segment = raw;
+  }
+  if (!segment) return "{id}";
+  if (segment.startsWith("{") && segment.endsWith("}") && ROUTE_PLACEHOLDER.test(segment.slice(1, -1))) {
+    return segment;
+  }
+  if (segment.includes("{") || segment.includes("}")) return "{id}";
+  if (looksLikeIdentifier(segment)) return "{id}";
+  const cleaned = [...segment]
+    .filter((ch) => ROUTE_LITERAL_CHAR.test(ch))
+    .join("")
+    .slice(0, 64);
+  return cleaned || "{id}";
+}
+
+function joinSegments(segments: string[]): string {
+  if (segments.length === 0) return "/";
+  return `/${segments.join("/")}`;
+}
+
+function truncateOnSegmentBoundary(route: string): string {
+  if (route.length <= MAX_ROUTE_LEN) return route;
+  if (route === "/") return route;
+  const parts = route.split("/").slice(1);
+  const kept: string[] = [];
+  for (const part of parts) {
+    const candidate = `/${[...kept, part].join("/")}`;
+    if (candidate.length > MAX_ROUTE_LEN) break;
+    kept.push(part);
+  }
+  if (kept.length === 0) return FALLBACK_ROUTE;
+  const truncated = `/${kept.join("/")}`;
+  return isValidRouteTemplate(truncated) ? truncated : FALLBACK_ROUTE;
+}
+
 export function sanitizeRoute(url: string): string {
   let path = "/";
   try {
@@ -380,9 +454,11 @@ export function sanitizeRoute(url: string): string {
   const segments = path
     .split("/")
     .filter((segment) => segment && segment !== "." && segment !== "..")
-    .map((segment) => (looksLikeIdentifier(segment) ? "{id}" : segment.replace(/[^\w.~!$&'()*+,;=-]/g, "").slice(0, 64) || "{id}"));
-  const route = `/${segments.join("/")}` || "/";
-  return route.slice(0, 200);
+    .map((segment) => normalizeSegment(segment));
+  let route = joinSegments(segments);
+  route = truncateOnSegmentBoundary(route);
+  if (!isValidRouteTemplate(route)) route = FALLBACK_ROUTE;
+  return route;
 }
 
 function looksLikeIdentifier(segment: string): boolean {
@@ -404,7 +480,7 @@ function buildEvent(integrationId: string, environment: string, input: HttpObser
   const env = input.environment ?? environment;
   if (!METHODS.has(method)) return null;
   if (!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(service)) return null;
-  if (!route.startsWith("/") || route.length > 200 || /[ ?#\\@%]/.test(route) || route.includes("://")) return null;
+  if (!isValidRouteTemplate(route)) return null;
   if (!Number.isInteger(duration) || duration < 0 || duration > 300_000) return null;
   if (!ENVIRONMENTS.has(env)) return null;
   if (statusCode === null) {

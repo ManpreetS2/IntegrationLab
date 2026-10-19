@@ -82,6 +82,8 @@ def validate_route_template(value: str) -> str:
         raise ValueError(
             "route_template must be a path template without a query, fragment, userinfo, or encoding"
         )
+    if value == "/":
+        return value
     segments = value.split("/")[1:]
     if not segments or any(segment == "" for segment in segments):
         raise ValueError("route_template must not contain empty segments")

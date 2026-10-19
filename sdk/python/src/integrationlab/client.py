@@ -43,6 +43,14 @@ _RETRY_AFTER_SECONDS_RE = re.compile(r"^[0-9]{1,10}$")
 _IMF_FIXDATE_RE = re.compile(
     r"^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$"
 )
+# Match backend ``validate_route_template`` so invalid routes never reach a batch.
+_ROUTE_PLACEHOLDER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
+_ROUTE_LITERAL = re.compile(r"^[A-Za-z0-9._~!$&'()*+,;=-]{1,64}$")
+_ROUTE_UUID = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_ROUTE_LONG_HEX = re.compile(r"^[0-9a-fA-F]{16,}$")
+_ROUTE_FORBIDDEN = set(" ?#\\@%")
 
 # (status_code, body, response_headers)
 Transport = Callable[[str, bytes, dict[str, str], float], tuple[int, bytes, Mapping[str, str]]]
@@ -70,6 +78,36 @@ def _warn_plain_http_base_url(base_url: str) -> None:
     if not host or _is_loopback_host(host):
         return
     warnings.warn(_PLAIN_HTTP_WARNING, UserWarning, stacklevel=3)
+
+
+def is_valid_route_template(value: str) -> bool:
+    """True when ``value`` matches the server's ``validate_route_template`` rules."""
+    if not isinstance(value, str) or not value.startswith("/") or len(value) > 200:
+        return False
+    if any(char in _ROUTE_FORBIDDEN for char in value) or "://" in value or "//" in value:
+        return False
+    if value == "/":
+        return True
+    segments = value.split("/")[1:]
+    if not segments or any(segment == "" for segment in segments):
+        return False
+    for segment in segments:
+        if segment.startswith("{") or segment.endswith("}"):
+            if not (segment.startswith("{") and segment.endswith("}")):
+                return False
+            if not _ROUTE_PLACEHOLDER.fullmatch(segment[1:-1]):
+                return False
+            continue
+        if segment in {".", ".."}:
+            return False
+        identifier_shaped = (
+            _ROUTE_UUID.fullmatch(segment) is not None
+            or _ROUTE_LONG_HEX.fullmatch(segment) is not None
+            or (segment.isdigit() and len(segment) > 6)
+        )
+        if _ROUTE_LITERAL.fullmatch(segment) is None or identifier_shaped:
+            return False
+    return True
 
 
 class IntegrationLabConfigError(ValueError):
@@ -488,9 +526,7 @@ def _build_event(
         return None
     if any(char.isupper() or char.isspace() for char in service):
         return None
-    if not isinstance(route_template, str) or not route_template.startswith("/") or len(route_template) > 200:
-        return None
-    if any(char in route_template for char in " ?#\\@%") or "://" in route_template:
+    if not is_valid_route_template(route_template):
         return None
     if not isinstance(duration_ms, int) or isinstance(duration_ms, bool) or duration_ms < 0 or duration_ms > 300_000:
         return None

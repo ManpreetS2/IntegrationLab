@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.datetime_params import require_timezone_aware
 from app.models.support import OperatorAuditEvent
 from app.repositories.support import audit_event_repository
 
@@ -33,6 +34,8 @@ def list_audit_events(
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
 ) -> list[OperatorAuditEvent]:
+    since = require_timezone_aware(since, "since")
+    until = require_timezone_aware(until, "until")
     try:
         rows = audit_event_repository.list(
             db,

@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
-from integrationlab.client import IntegrationLabClient, _UNMAPPED, category_for_status
+from integrationlab.client import IntegrationLabClient, _UNMAPPED, category_for_status, is_valid_route_template
 
 _UUID = (
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+_ROUTE_PLACEHOLDER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
+_ROUTE_LITERAL_CHAR = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=-]")
+_MAX_ROUTE_LEN = 200
+_FALLBACK_ROUTE = "/{path}"
 
 
 def sanitize_route(url: str) -> str:
@@ -20,20 +25,57 @@ def sanitize_route(url: str) -> str:
     for segment in path.split("/"):
         if not segment or segment in {".", ".."}:
             continue
-        if _looks_like_identifier(segment):
-            segments.append("{id}")
-        else:
-            cleaned = "".join(
-                char for char in segment if char.isalnum() or char in "._~!$&'()*+,;=-{}"
-            )
-            segments.append(cleaned[:64] or "{id}")
-    route = "/" + "/".join(segments) if segments else "/"
-    return route[:200]
+        segments.append(_normalize_segment(segment))
+    route = _join_segments(segments)
+    route = _truncate_on_segment_boundary(route)
+    if not is_valid_route_template(route):
+        route = _FALLBACK_ROUTE
+    return route
+
+
+def _normalize_segment(raw: str) -> str:
+    segment = unquote(raw)
+    if not segment:
+        return "{id}"
+    if (
+        segment.startswith("{")
+        and segment.endswith("}")
+        and _ROUTE_PLACEHOLDER.fullmatch(segment[1:-1])
+    ):
+        return segment
+    if "{" in segment or "}" in segment:
+        return "{id}"
+    if _looks_like_identifier(segment):
+        return "{id}"
+    cleaned = "".join(ch for ch in segment if _ROUTE_LITERAL_CHAR.fullmatch(ch))[:64]
+    return cleaned or "{id}"
+
+
+def _join_segments(segments: list[str]) -> str:
+    if not segments:
+        return "/"
+    return "/" + "/".join(segments)
+
+
+def _truncate_on_segment_boundary(route: str) -> str:
+    if len(route) <= _MAX_ROUTE_LEN:
+        return route
+    if route == "/":
+        return route
+    parts = route.split("/")[1:]
+    kept: list[str] = []
+    for part in parts:
+        candidate = "/" + "/".join(kept + [part])
+        if len(candidate) > _MAX_ROUTE_LEN:
+            break
+        kept.append(part)
+    if not kept:
+        return _FALLBACK_ROUTE
+    truncated = "/" + "/".join(kept)
+    return truncated if is_valid_route_template(truncated) else _FALLBACK_ROUTE
 
 
 def _looks_like_identifier(segment: str) -> bool:
-    import re
-
     if re.fullmatch(_UUID, segment):
         return True
     if segment.isdigit() and len(segment) > 6:

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { errorMessage } from '../hooks'
 import type { Environment, IntegrationProvider } from '../types'
 
 interface CreateIntegrationFormProps {
@@ -30,7 +31,7 @@ function CreateIntegrationForm({ onSubmit, disabled = false }: CreateIntegration
       setName('')
       setProvider('github')
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Failed to create integration.')
+      setFormError(errorMessage(error, 'Failed to create integration.'))
     } finally {
       setSubmitting(false)
     }

@@ -58,6 +58,19 @@ def test_create_case_valid_transition_resolve_reopen(client, github_integration_
     assert invalid.status_code == 400
 
 
+def test_patch_support_case_rejects_blank_or_null_title(client, github_integration_id) -> None:
+    case_id = client.post(
+        "/api/support-cases",
+        json={
+            "integration_id": github_integration_id,
+            "title": "Initial title",
+            "severity": "SEV3",
+        },
+    ).json()["id"]
+    assert client.patch(f"/api/support-cases/{case_id}", json={"title": "   "}).status_code == 422
+    assert client.patch(f"/api/support-cases/{case_id}", json={"title": None}).status_code == 422
+
+
 def test_invalid_transition_from_resolved_to_identified(client, github_integration_id):
     case_id = client.post(
         "/api/support-cases",

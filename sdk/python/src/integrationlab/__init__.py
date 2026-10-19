@@ -9,6 +9,7 @@ from integrationlab.client import (
     FlushResult,
     IntegrationLabClient,
     IntegrationLabConfigError,
+    is_valid_route_template,
 )
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     "FlushResult",
     "IntegrationLabClient",
     "IntegrationLabConfigError",
+    "is_valid_route_template",
 ]
 __version__ = "0.1.0"
