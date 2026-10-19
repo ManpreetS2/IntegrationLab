@@ -201,7 +201,7 @@ Do not mix these evidence classes. Details: [portfolio-evidence.md](docs/portfol
 
 ### Automated
 
-In the 2026-10-17 acceptance run: backend pytest **367 passed**, frontend **30 unit tests**, lint and production build passed, and both SDK unit suites passed. The latest six-job GitHub Actions run on `main` also passed (backend, frontend, both containers, Compose smoke, Terraform validate).
+In the 2026-10-17 acceptance run: backend pytest **367 passed**, frontend **30 unit tests**, lint and production build passed, and both SDK unit suites passed. The latest seven-job GitHub Actions run on `main` also passed (backend, frontend, SDK tests, both containers, Compose smoke, Terraform validate).
 
 ### Current external acceptance
 
@@ -236,7 +236,7 @@ python3 examples/universal-monitoring/accept.py
 
 Pytest and the acceptance script use a database whose name ends in `_test`. They refuse the application database.
 
-GitHub Actions runs six jobs: backend tests, frontend quality, backend image, frontend image, Compose smoke, and Terraform validate. The smoke job builds its own stack and deletes that stack's volume when it finishes.
+GitHub Actions runs seven jobs: backend tests, frontend quality, SDK tests, backend image, frontend image, Compose smoke, and Terraform validate. The smoke job builds its own stack and deletes that stack's volume when it finishes.
 
 Final portfolio screenshots: [docs/assets/final/](docs/assets/final/). Recovery demos: [docs/failure-recovery-demo.md](docs/failure-recovery-demo.md).
 
