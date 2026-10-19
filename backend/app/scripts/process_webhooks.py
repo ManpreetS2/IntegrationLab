@@ -13,6 +13,7 @@ import logging
 import sys
 
 from app.core.database import SessionLocal
+from app.services.audit import audit_service
 from app.services.webhook_processor import MAX_BATCH, stripe_webhook_processor
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -32,6 +33,16 @@ def main(argv: list[str] | None = None) -> int:
 
     session = SessionLocal()
     try:
+        audit_service.record(
+            session,
+            action="webhook_process_due_requested",
+            target_type="webhook_batch",
+            target_id=None,
+            safe_summary=f"CLI requested processing of due Stripe webhooks (limit={args.limit})",
+            metadata={"limit": args.limit, "provider": "stripe"},
+            actor_type="cli",
+            commit=True,
+        )
         counts = stripe_webhook_processor.process_due(session, limit=args.limit)
     finally:
         session.close()

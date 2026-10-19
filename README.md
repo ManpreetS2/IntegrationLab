@@ -222,6 +222,8 @@ Older v2 provider verification and videos remain labeled historical. They do not
 
 ## Tests and CI
 
+Frontend unit tests and the TypeScript SDK require **Node.js 22+** (see `frontend/package.json` `engines` and `.nvmrc`).
+
 From a checkout with the backend virtualenv and frontend dependencies:
 
 ```bash

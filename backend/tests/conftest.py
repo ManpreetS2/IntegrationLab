@@ -36,7 +36,8 @@ os.environ["GITHUB_OAUTH_REDIRECT_URI"] = (
 )
 os.environ["FRONTEND_URL"] = "http://localhost:5173"
 # Operator auth is covered by dedicated tests; default suite stays open.
-os.environ.pop("OPERATOR_API_KEY", None)
+# Empty env var must override backend/.env so local developer keys do not gate tests.
+os.environ["OPERATOR_API_KEY"] = ""
 # Obviously fake webhook secret; tests sign payloads with it locally.
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_example")
 

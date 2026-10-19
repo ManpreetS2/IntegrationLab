@@ -34,8 +34,13 @@ class SlidingWindowLimiter:
             cutoff = now - self.window_seconds
             while hits and hits[0] <= cutoff:
                 hits.popleft()
+            if not hits:
+                self._hits.pop(key, None)
             if len(hits) >= self.limit:
                 return False
+            if key not in self._hits:
+                hits = deque()
+                self._hits[key] = hits
             hits.append(now)
             return True
 
