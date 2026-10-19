@@ -34,7 +34,7 @@ jobs:
       APP_ENV: test
       DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@localhost:5432/integrationlab_test
       TEST_DATABASE_URL: postgresql+psycopg://integrationlab:integrationlab@localhost:5432/integrationlab_test
-      # Clearly fake test-only values â€” never production secrets.
+      # Clearly fake test-only values — never production secrets.
       # Valid Fernet key bytes, clearly test-only (not a production secret).
       TOKEN_ENCRYPTION_KEY: "dGVzdC1mZXJuZXQta2V5LTMyYnl0ZXMtYWJjZGVmZ2g="
       GITHUB_CLIENT_ID: test-github-client-id
@@ -215,7 +215,7 @@ jobs:
           grep -q 'condition: service_completed_successfully' /tmp/compose.full.yml
           grep -q 'alembic' /tmp/compose.full.yml
           grep -q 'upgrade' /tmp/compose.full.yml
-          echo "docker-compose.full.yml migrate â†’ backend ordering present"
+          echo "docker-compose.full.yml migrate → backend ordering present"
 
 
   full-stack-smoke:
