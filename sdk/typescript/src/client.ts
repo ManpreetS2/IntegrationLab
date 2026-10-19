@@ -11,6 +11,13 @@ const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIO
 const DROP_STATUSES = new Set([400, 401, 403, 413, 422]);
 const RETRY_AFTER_STATUSES = new Set([429, 503]);
 export const MAX_RETRY_AFTER_MS = 120_000;
+/** Floor when Retry-After is 0 / a past HTTP-date — avoids a busy spin. */
+export const MIN_RETRY_AFTER_MS = 50;
+/** Separate budget so Retry-After waits cannot loop forever. */
+export const MAX_RATE_LIMITED_ATTEMPTS = 5;
+const RETRY_AFTER_SECONDS_RE = /^[0-9]{1,10}$/;
+/** IMF-fixdate (RFC 7231), e.g. Sun, 06 Nov 1994 08:49:37 GMT */
+const IMF_FIXDATE_RE = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 
 export class IntegrationLabConfigError extends Error {
   constructor(message: string) {
@@ -120,10 +127,12 @@ export class IntegrationLabClient {
   private readonly retryBackoffMs: number;
   private readonly transport: Transport;
   private readonly sleepFn: (ms: number) => Promise<void>;
+  private readonly customSleep: boolean;
   private readonly buffer: EventBody[] = [];
   private tail: Promise<void> = Promise.resolve();
   private stopped = false;
   private lastError: string | null = null;
+  private activeDelay: { cancel: () => void } | null = null;
 
   constructor(config: ClientConfig) {
     assertServerSide();
@@ -150,6 +159,7 @@ export class IntegrationLabClient {
     this.maxRetries = config.maxRetries ?? 3;
     this.retryBackoffMs = config.retryBackoffMs ?? 200;
     this.transport = config.transport ?? defaultTransport(config.fetchImpl ?? fetch);
+    this.customSleep = config.sleep !== undefined;
     this.sleepFn = config.sleep ?? sleep;
     if (this.timeoutMs <= 0 || this.maxQueue < 1 || this.batchSize < 1 || this.maxRetries < 1) {
       throw new IntegrationLabConfigError("timeout, queue, batch size, and retries must be positive");
@@ -254,9 +264,11 @@ export class IntegrationLabClient {
   }
 
   async close(timeoutMs = 5000): Promise<FlushResult> {
-    const result = await this.flush(timeoutMs);
+    // Signal stop before flush so in-flight Retry-After loops abort promptly.
     this.stopped = true;
-    return result;
+    this.activeDelay?.cancel();
+    this.activeDelay = null;
+    return this.flush(timeoutMs);
   }
 
   private async drain(): Promise<void> {
@@ -272,9 +284,27 @@ export class IntegrationLabClient {
     }
   }
 
+  private async waitOrStop(ms: number): Promise<boolean> {
+    if (this.stopped) return true;
+    if (this.customSleep) {
+      await this.sleepFn(ms);
+      return this.stopped;
+    }
+    const handle = delay(ms);
+    this.activeDelay = handle;
+    try {
+      await handle.promise;
+    } finally {
+      if (this.activeDelay === handle) this.activeDelay = null;
+    }
+    return this.stopped;
+  }
+
   private async deliver(batch: EventBody[]): Promise<void> {
     let attempt = 0;
+    let rateLimitedAttempts = 0;
     while (attempt < this.maxRetries) {
+      if (this.stopped) break;
       try {
         const response = await this.transport(
           `${this.baseUrl}/api/telemetry/v1/events`,
@@ -301,9 +331,13 @@ export class IntegrationLabClient {
         if (RETRY_AFTER_STATUSES.has(response.status)) {
           const retryAfterMs = parseRetryAfterMs(headerValue(response.headers, "Retry-After"));
           if (retryAfterMs !== null) {
-            // Honor Retry-After without spending the per-batch retry budget.
+            rateLimitedAttempts += 1;
             this.stats.rateLimited += 1;
-            await this.sleepFn(Math.min(retryAfterMs, MAX_RETRY_AFTER_MS));
+            if (rateLimitedAttempts >= MAX_RATE_LIMITED_ATTEMPTS) {
+              break;
+            }
+            const waitMs = Math.min(Math.max(retryAfterMs, MIN_RETRY_AFTER_MS), MAX_RETRY_AFTER_MS);
+            if (await this.waitOrStop(waitMs)) break;
             continue;
           }
         }
@@ -312,7 +346,7 @@ export class IntegrationLabClient {
       }
       attempt += 1;
       if (attempt < this.maxRetries && this.retryBackoffMs > 0) {
-        await this.sleepFn(this.retryBackoffMs * 2 ** (attempt - 1));
+        if (await this.waitOrStop(this.retryBackoffMs * 2 ** (attempt - 1))) break;
       }
     }
     this.stats.dropped += batch.length;
@@ -402,12 +436,14 @@ function ackCounts(body: string, batchSize: number): { accepted: number; duplica
 }
 
 export function parseRetryAfterMs(value: string | null | undefined, nowMs: number = Date.now()): number | null {
+  /** Accept only plain non-negative integer seconds (≤10 digits) or IMF-fixdate. */
   if (value === null || value === undefined) return null;
   const text = value.trim();
   if (!text) return null;
-  if (/^\d+$/.test(text)) {
+  if (RETRY_AFTER_SECONDS_RE.test(text)) {
     return Number.parseInt(text, 10) * 1000;
   }
+  if (!IMF_FIXDATE_RE.test(text)) return null;
   const when = Date.parse(text);
   if (Number.isNaN(when)) return null;
   return Math.max(0, when - nowMs);
@@ -478,9 +514,26 @@ function sleep(ms: number): Promise<void> {
 }
 
 function delay(ms: number): { promise: Promise<void>; cancel: () => void } {
-  let timer: ReturnType<typeof setTimeout>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let resolveFn: (() => void) | undefined;
+  let settled = false;
   const promise = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, ms);
+    resolveFn = resolve;
+    timer = setTimeout(() => {
+      settled = true;
+      resolve();
+    }, ms);
+    // Allow Node to exit while a Retry-After wait is outstanding.
+    timer.unref?.();
   });
-  return { promise, cancel: () => clearTimeout(timer) };
+  return {
+    promise,
+    cancel: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      if (!settled && resolveFn) {
+        settled = true;
+        resolveFn();
+      }
+    },
+  };
 }

@@ -5,7 +5,9 @@ import test from "node:test";
 import {
   IntegrationLabClient,
   IntegrationLabConfigError,
+  MAX_RATE_LIMITED_ATTEMPTS,
   MAX_RETRY_AFTER_MS,
+  MIN_RETRY_AFTER_MS,
   parseRetryAfterMs,
   sanitizeRoute,
 } from "../dist/index.js";
@@ -295,6 +297,83 @@ test("honors Retry-After HTTP-date and caps the wait", async () => {
   assert.equal(lab.stats.rateLimited, 1);
   assert.equal(lab.stats.accepted, 1);
   await lab.close();
+});
+
+test("parseRetryAfterMs rejects junk and oversized digit strings", () => {
+  assert.equal(parseRetryAfterMs("2"), 2000);
+  assert.equal(parseRetryAfterMs("0"), 0);
+  assert.equal(parseRetryAfterMs("-5"), null);
+  assert.equal(parseRetryAfterMs("1.5"), null);
+  assert.equal(parseRetryAfterMs("abc 2"), null);
+  assert.equal(parseRetryAfterMs("1".repeat(11)), null);
+  assert.equal(parseRetryAfterMs("not-a-date"), null);
+});
+
+test("repeated Retry-After eventually drops the batch", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const lab = client(
+    async () => {
+      calls += 1;
+      return { status: 429, body: "", headers: { "Retry-After": "0" } };
+    },
+    {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  const result = await lab.flush(2000);
+  assert.equal(calls, MAX_RATE_LIMITED_ATTEMPTS);
+  assert.equal(sleeps.length, MAX_RATE_LIMITED_ATTEMPTS - 1);
+  assert.ok(sleeps.every((ms) => ms === MIN_RETRY_AFTER_MS));
+  assert.equal(lab.stats.dropped, 1);
+  assert.equal(lab.stats.accepted, 0);
+  assert.equal(lab.stats.rateLimited, MAX_RATE_LIMITED_ATTEMPTS);
+  assert.equal(lab.stats.deliveryFailures, 1);
+  assert.equal(result.lastError, "http_429");
+  await lab.close();
+});
+
+test("close stops the Retry-After retry loop", async () => {
+  let calls = 0;
+  let resolveSleep;
+  const firstSleep = new Promise((resolve) => {
+    resolveSleep = resolve;
+  });
+  const lab = client(
+    async () => {
+      calls += 1;
+      return { status: 429, body: "", headers: { "Retry-After": "60" } };
+    },
+    {
+      sleep: async () => {
+        await firstSleep;
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  await waitFor(() => calls >= 1);
+  const closePromise = lab.close(500);
+  resolveSleep();
+  await closePromise;
+  const callsAtClose = calls;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(calls <= callsAtClose + 1);
+  assert.ok(lab.stats.dropped >= 1);
 });
 
 test("429 without Retry-After keeps exponential backoff", async () => {

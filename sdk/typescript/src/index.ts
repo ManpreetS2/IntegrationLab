@@ -6,7 +6,9 @@
 export {
   IntegrationLabClient,
   IntegrationLabConfigError,
+  MAX_RATE_LIMITED_ATTEMPTS,
   MAX_RETRY_AFTER_MS,
+  MIN_RETRY_AFTER_MS,
   categoryForStatus,
   parseRetryAfterMs,
   sanitizeRoute,

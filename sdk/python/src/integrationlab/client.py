@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -31,6 +32,15 @@ _METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 _DROP_STATUSES = {400, 401, 403, 413, 422}
 _RETRY_AFTER_STATUSES = {429, 503}
 MAX_RETRY_AFTER_SECONDS = 120.0
+# Floor when Retry-After is 0 / a past HTTP-date — avoids a busy spin.
+MIN_RETRY_AFTER_SECONDS = 0.05
+# Separate budget so Retry-After waits cannot loop forever.
+MAX_RATE_LIMITED_ATTEMPTS = 5
+_RETRY_AFTER_SECONDS_RE = re.compile(r"^[0-9]{1,10}$")
+# IMF-fixdate (RFC 7231), e.g. Sun, 06 Nov 1994 08:49:37 GMT
+_IMF_FIXDATE_RE = re.compile(
+    r"^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$"
+)
 
 # (status_code, body, response_headers)
 Transport = Callable[[str, bytes, dict[str, str], float], tuple[int, bytes, Mapping[str, str]]]
@@ -106,6 +116,7 @@ class IntegrationLabClient:
         self._max_retries = max_retries
         self._backoff = max(0.0, retry_backoff_seconds)
         self._transport = transport or _urllib_transport
+        self._custom_sleep = sleep is not None
         self._sleep = sleep or time.sleep
         self.stats = ClientStats()
         self._last_error: str | None = None
@@ -254,20 +265,40 @@ class IntegrationLabClient:
             )
 
     def close(self, *, flush_timeout: float = 5.0) -> FlushResult:
-        """Flush, stop the worker, and return the flush result."""
+        """Stop delivery loops, flush what remains, and join the worker."""
         if self._closed and not self._thread.is_alive():
             return self.flush(timeout=0)
-        result = self.flush(timeout=flush_timeout)
+        # Signal stop before flush so in-flight Retry-After loops abort promptly.
         with self._cv:
             self._closed = True
             self._stop = True
             self._cv.notify_all()
+        result = self.flush(timeout=flush_timeout)
         self._thread.join(timeout=flush_timeout)
         try:
             atexit.unregister(self._shutdown_from_atexit)
         except Exception:
             pass
         return result
+
+    def _wait_or_stop(self, seconds: float) -> bool:
+        """Wait ``seconds`` (or until stop/close). Returns True if stopped."""
+        if self._stop or self._closed:
+            return True
+        if self._custom_sleep:
+            # Injectable sleeper (tests): record the full wait, then re-check stop.
+            self._sleep(seconds)
+            return bool(self._stop or self._closed)
+        if seconds <= 0:
+            return False
+        deadline = time.monotonic() + seconds
+        with self._cv:
+            while not self._stop and not self._closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._cv.wait(timeout=remaining)
+            return True
 
     def __enter__(self) -> IntegrationLabClient:
         return self
@@ -303,7 +334,10 @@ class IntegrationLabClient:
 
     def _deliver(self, batch: list[dict[str, Any]]) -> None:
         attempt = 0
+        rate_limited_attempts = 0
         while attempt < self._max_retries:
+            if self._stop or self._closed:
+                break
             try:
                 outcome, retry_after = self._post(batch)
             except Exception:
@@ -315,13 +349,18 @@ class IntegrationLabClient:
                 self.stats.rejected += len(batch)
                 return
             if outcome == "rate_limited" and retry_after is not None:
-                # Honor Retry-After without spending the per-batch retry budget.
+                rate_limited_attempts += 1
                 self.stats.rate_limited += 1
-                self._sleep(min(retry_after, MAX_RETRY_AFTER_SECONDS))
+                if rate_limited_attempts >= MAX_RATE_LIMITED_ATTEMPTS:
+                    break
+                wait = min(max(retry_after, MIN_RETRY_AFTER_SECONDS), MAX_RETRY_AFTER_SECONDS)
+                if self._wait_or_stop(wait):
+                    break
                 continue
             attempt += 1
             if attempt < self._max_retries and self._backoff:
-                self._sleep(self._backoff * (2 ** (attempt - 1)))
+                if self._wait_or_stop(self._backoff * (2 ** (attempt - 1))):
+                    break
         self.stats.dropped += len(batch)
         self.stats.delivery_failures += 1
 
@@ -458,14 +497,21 @@ def _ack_counts(payload: bytes, batch_size: int) -> tuple[int, int]:
 
 
 def parse_retry_after(value: str | None, *, now: datetime | None = None) -> float | None:
-    """Parse a Retry-After header (delta-seconds or HTTP-date) into seconds to wait."""
+    """Parse Retry-After as delta-seconds (1–10 digits) or IMF-fixdate HTTP-date.
+
+    Returns ``None`` for malformed values (including unicode digits and junk
+    that ``Date.parse`` / ``isdigit`` would otherwise accept). A past HTTP-date
+    yields ``0.0``; callers apply ``MIN_RETRY_AFTER_SECONDS``.
+    """
     if value is None:
         return None
     text = value.strip()
     if not text:
         return None
-    if text.isdigit():
+    if _RETRY_AFTER_SECONDS_RE.fullmatch(text):
         return float(int(text))
+    if not _IMF_FIXDATE_RE.fullmatch(text):
+        return None
     try:
         when = parsedate_to_datetime(text)
     except (TypeError, ValueError, IndexError, OverflowError):

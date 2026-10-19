@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from uuid import uuid4
 
 import pytest
@@ -317,6 +318,88 @@ def test_honors_retry_after_http_date_and_caps_wait() -> None:
     assert sleeps == [MAX_RETRY_AFTER_SECONDS]
     assert lab.stats.rate_limited == 1
     assert lab.stats.accepted == 1
+
+
+def test_parse_retry_after_rejects_junk_and_oversized_digits() -> None:
+    from integrationlab.client import parse_retry_after
+
+    assert parse_retry_after("2") == 2.0
+    assert parse_retry_after("0") == 0.0
+    assert parse_retry_after("²") is None
+    assert parse_retry_after("1.5") is None
+    assert parse_retry_after("-5") is None
+    assert parse_retry_after("abc 2") is None
+    assert parse_retry_after("1" * 11) is None
+    assert parse_retry_after("not-a-date") is None
+
+
+def test_repeated_retry_after_eventually_drops_batch() -> None:
+    from integrationlab.client import MAX_RATE_LIMITED_ATTEMPTS, MIN_RETRY_AFTER_SECONDS
+
+    state = {"n": 0}
+    sleeps: list[float] = []
+
+    def always_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        return 429, b"", {"Retry-After": "0"}
+
+    transport = Transport(always_limited)
+    with _client(transport, sleep=sleeps.append) as lab:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        result = lab.flush(timeout=2)
+    assert state["n"] == MAX_RATE_LIMITED_ATTEMPTS
+    assert len(sleeps) == MAX_RATE_LIMITED_ATTEMPTS - 1
+    assert all(s == MIN_RETRY_AFTER_SECONDS for s in sleeps)
+    assert lab.stats.dropped == 1
+    assert lab.stats.accepted == 0
+    assert lab.stats.rate_limited == MAX_RATE_LIMITED_ATTEMPTS
+    assert lab.stats.delivery_failures == 1
+    assert result.last_error == "http_429"
+
+
+def test_close_stops_rate_limited_retry_loop() -> None:
+    release = threading.Event()
+    state = {"n": 0}
+
+    def slow_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        return 429, b"", {"Retry-After": "60"}
+
+    def blocking_sleep(seconds: float) -> None:
+        release.wait(timeout=2)
+
+    transport = Transport(slow_limited)
+    lab = _client(transport, sleep=blocking_sleep)
+    try:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        # Let the worker enter the Retry-After wait.
+        deadline = time.time() + 2
+        while state["n"] < 1 and time.time() < deadline:
+            time.sleep(0.01)
+        assert state["n"] >= 1
+        lab.close(flush_timeout=1)
+        # After close, further POSTs must not continue indefinitely.
+        calls_at_close = state["n"]
+        time.sleep(0.05)
+        release.set()
+        time.sleep(0.05)
+        assert state["n"] <= calls_at_close + 1
+        assert lab.stats.dropped >= 1
+    finally:
+        release.set()
+        lab.close(flush_timeout=1)
 
 
 def test_429_without_retry_after_keeps_exponential_backoff() -> None:

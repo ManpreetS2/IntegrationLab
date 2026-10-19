@@ -65,7 +65,7 @@ The wrapped call returns the same response, or raises the same exception, whethe
 - Batches of at most 100 events.
 - Delivery timeout defaults to 2 seconds.
 - Three attempts with exponential backoff for transport failures and retryable HTTP errors (including 429/503 without `Retry-After`).
-- When the server returns HTTP 429 or 503 with a `Retry-After` header (delta-seconds or HTTP-date), the SDK waits that long (capped at 120 seconds), keeps the batch, and does **not** spend a retry attempt. Counted on `client.stats.rate_limited`.
+- When the server returns HTTP 429 or 503 with a `Retry-After` header (delta-seconds or IMF-fixdate), the SDK waits that long (floored at 50ms, capped at 120s) without spending the normal retry budget. At most 5 such waits per batch; then the batch is dropped. Counted on `client.stats.rate_limited`. `close()` aborts an in-flight wait.
 - HTTP 401, 403, and 422 are not retried.
 - When the queue is full or delivery is exhausted, the event is counted on `client.stats` and dropped.
 - `close()` flushes and stops the thread. Process exit also attempts a short flush.
