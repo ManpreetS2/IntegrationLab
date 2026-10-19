@@ -9,6 +9,8 @@ export const SDK_VERSION = "0.1.0";
 const ENVIRONMENTS = new Set(["local", "test", "staging", "production"]);
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 const DROP_STATUSES = new Set([400, 401, 403, 413, 422]);
+const RETRY_AFTER_STATUSES = new Set([429, 503]);
+export const MAX_RETRY_AFTER_MS = 120_000;
 
 export class IntegrationLabConfigError extends Error {
   constructor(message: string) {
@@ -24,6 +26,7 @@ export interface ClientStats {
   accepted: number;
   duplicates: number;
   deliveryFailures: number;
+  rateLimited: number;
 }
 
 export interface FlushResult {
@@ -46,12 +49,18 @@ export interface HttpObservationInput {
   environment?: string;
 }
 
+export type TransportResult = {
+  status: number;
+  body: string;
+  headers?: Record<string, string>;
+};
+
 export type Transport = (
   url: string,
   body: string,
   headers: Record<string, string>,
   timeoutMs: number,
-) => Promise<{ status: number; body: string }>;
+) => Promise<TransportResult>;
 
 export type InstrumentedRequestInit = RequestInit & {
   integrationlabRouteTemplate?: string;
@@ -69,6 +78,8 @@ export interface ClientConfig {
   retryBackoffMs?: number;
   transport?: Transport;
   fetchImpl?: typeof fetch;
+  /** Injectable sleep for tests (milliseconds). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface EventBody {
@@ -95,6 +106,7 @@ export class IntegrationLabClient {
     accepted: 0,
     duplicates: 0,
     deliveryFailures: 0,
+    rateLimited: 0,
   };
 
   private readonly baseUrl: string;
@@ -107,6 +119,7 @@ export class IntegrationLabClient {
   private readonly maxRetries: number;
   private readonly retryBackoffMs: number;
   private readonly transport: Transport;
+  private readonly sleepFn: (ms: number) => Promise<void>;
   private readonly buffer: EventBody[] = [];
   private tail: Promise<void> = Promise.resolve();
   private stopped = false;
@@ -137,6 +150,7 @@ export class IntegrationLabClient {
     this.maxRetries = config.maxRetries ?? 3;
     this.retryBackoffMs = config.retryBackoffMs ?? 200;
     this.transport = config.transport ?? defaultTransport(config.fetchImpl ?? fetch);
+    this.sleepFn = config.sleep ?? sleep;
     if (this.timeoutMs <= 0 || this.maxQueue < 1 || this.batchSize < 1 || this.maxRetries < 1) {
       throw new IntegrationLabConfigError("timeout, queue, batch size, and retries must be positive");
     }
@@ -259,7 +273,8 @@ export class IntegrationLabClient {
   }
 
   private async deliver(batch: EventBody[]): Promise<void> {
-    for (let attempt = 0; attempt < this.maxRetries; attempt += 1) {
+    let attempt = 0;
+    while (attempt < this.maxRetries) {
       try {
         const response = await this.transport(
           `${this.baseUrl}/api/telemetry/v1/events`,
@@ -283,11 +298,21 @@ export class IntegrationLabClient {
           this.stats.rejected += batch.length;
           return;
         }
+        if (RETRY_AFTER_STATUSES.has(response.status)) {
+          const retryAfterMs = parseRetryAfterMs(headerValue(response.headers, "Retry-After"));
+          if (retryAfterMs !== null) {
+            // Honor Retry-After without spending the per-batch retry budget.
+            this.stats.rateLimited += 1;
+            await this.sleepFn(Math.min(retryAfterMs, MAX_RETRY_AFTER_MS));
+            continue;
+          }
+        }
       } catch {
         this.lastError = "transport_error";
       }
-      if (attempt + 1 < this.maxRetries && this.retryBackoffMs > 0) {
-        await sleep(this.retryBackoffMs * 2 ** attempt);
+      attempt += 1;
+      if (attempt < this.maxRetries && this.retryBackoffMs > 0) {
+        await this.sleepFn(this.retryBackoffMs * 2 ** (attempt - 1));
       }
     }
     this.stats.dropped += batch.length;
@@ -376,6 +401,27 @@ function ackCounts(body: string, batchSize: number): { accepted: number; duplica
   }
 }
 
+export function parseRetryAfterMs(value: string | null | undefined, nowMs: number = Date.now()): number | null {
+  if (value === null || value === undefined) return null;
+  const text = value.trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) {
+    return Number.parseInt(text, 10) * 1000;
+  }
+  const when = Date.parse(text);
+  if (Number.isNaN(when)) return null;
+  return Math.max(0, when - nowMs);
+}
+
+function headerValue(headers: Record<string, string> | undefined, name: string): string | null {
+  if (!headers) return null;
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return null;
+}
+
 function defaultTransport(fetchImpl: typeof fetch): Transport {
   return async (url, body, headers, timeoutMs) => {
     const response = await fetchImpl(url, {
@@ -385,7 +431,11 @@ function defaultTransport(fetchImpl: typeof fetch): Transport {
       signal: AbortSignal.timeout(timeoutMs),
     });
     const text = await response.text();
-    return { status: response.status, body: text.slice(0, 2048) };
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      responseHeaders[key] = value;
+    });
+    return { status: response.status, body: text.slice(0, 2048), headers: responseHeaders };
   };
 }
 

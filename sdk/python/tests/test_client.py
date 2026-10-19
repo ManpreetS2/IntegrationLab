@@ -252,6 +252,111 @@ def test_sanitize_route_drops_query_and_identifiers() -> None:
     assert "pw" not in route
 
 
+def test_honors_retry_after_seconds_without_consuming_retry_budget() -> None:
+    state = {"n": 0}
+    sleeps: list[float] = []
+
+    def rate_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        if state["n"] == 1:
+            return 429, b'{"detail":"slow down"}', {"Retry-After": "2"}
+        return 200, b'{"accepted":1,"duplicates":0}', {}
+
+    transport = Transport(rate_limited)
+    with _client(transport, sleep=sleeps.append) as lab:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        result = lab.flush(timeout=2)
+    assert result.delivered
+    assert state["n"] == 2
+    assert sleeps == [2.0]
+    assert lab.stats.accepted == 1
+    assert lab.stats.dropped == 0
+    assert lab.stats.rate_limited == 1
+    assert lab.stats.delivery_failures == 0
+
+
+def test_honors_retry_after_http_date_and_caps_wait() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from integrationlab.client import MAX_RETRY_AFTER_SECONDS, parse_retry_after
+
+    future = datetime.now(timezone.utc) + timedelta(seconds=500)
+    assert parse_retry_after("2") == 2.0
+    assert parse_retry_after(future.strftime("%a, %d %b %Y %H:%M:%S GMT")) >= 400
+
+    state = {"n": 0}
+    sleeps: list[float] = []
+
+    def rate_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        if state["n"] == 1:
+            return (
+                429,
+                b"",
+                {"Retry-After": future.strftime("%a, %d %b %Y %H:%M:%S GMT")},
+            )
+        return 200, b'{"accepted":1,"duplicates":0}', {}
+
+    transport = Transport(rate_limited)
+    with _client(transport, sleep=sleeps.append) as lab:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        lab.flush(timeout=2)
+    assert state["n"] == 2
+    assert sleeps == [MAX_RETRY_AFTER_SECONDS]
+    assert lab.stats.rate_limited == 1
+    assert lab.stats.accepted == 1
+
+
+def test_429_without_retry_after_keeps_exponential_backoff() -> None:
+    state = {"n": 0}
+    sleeps: list[float] = []
+
+    def rate_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        if state["n"] < 3:
+            return 429, b"", {}
+        return 200, b'{"accepted":1,"duplicates":0}', {}
+
+    transport = Transport(rate_limited)
+    lab = IntegrationLabClient(
+        base_url="http://127.0.0.1:8010",
+        integration_id=INTEGRATION_ID,
+        credential=CREDENTIAL,
+        timeout_seconds=0.2,
+        max_retries=3,
+        retry_backoff_seconds=0.2,
+        transport=transport,
+        sleep=sleeps.append,
+    )
+    try:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        lab.flush(timeout=2)
+    finally:
+        lab.close(flush_timeout=2)
+    assert state["n"] == 3
+    assert sleeps == [0.2, 0.4]
+    assert lab.stats.accepted == 1
+    assert lab.stats.rate_limited == 0
+
+
 def test_config_rejects_operator_key_and_loads_env() -> None:
     with pytest.raises(IntegrationLabConfigError):
         IntegrationLabClient(

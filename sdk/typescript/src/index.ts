@@ -6,7 +6,9 @@
 export {
   IntegrationLabClient,
   IntegrationLabConfigError,
+  MAX_RETRY_AFTER_MS,
   categoryForStatus,
+  parseRetryAfterMs,
   sanitizeRoute,
 } from "./client.js";
 export type {
@@ -15,4 +17,5 @@ export type {
   HttpObservationInput,
   InstrumentedRequestInit,
   Transport,
+  TransportResult,
 } from "./client.js";

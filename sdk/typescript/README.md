@@ -50,4 +50,4 @@ await lab.close();
 
 `recordHttp` queues an observation when you already have the status or a transport error. Invalid events are counted on `lab.stats.rejected` and are not thrown.
 
-Delivery uses a bounded queue, a 2 second timeout, and three attempts for transport failures, HTTP 429, and HTTP 5xx. HTTP 401, 403, and 422 are not retried. A full queue or an exhausted delivery drops the event and increments `lab.stats`. Call `close()` during process shutdown.
+Delivery uses a bounded queue, a 2 second timeout, and three attempts with exponential backoff for transport failures and retryable HTTP errors (including 429/503 without `Retry-After`). When the server returns HTTP 429 or 503 with a `Retry-After` header (delta-seconds or HTTP-date), the SDK waits that long (capped at 120 seconds), keeps the batch, and does **not** spend a retry attempt — counted on `lab.stats.rateLimited`. HTTP 401, 403, and 422 are not retried. A full queue or an exhausted delivery drops the event and increments `lab.stats`. Call `close()` during process shutdown.

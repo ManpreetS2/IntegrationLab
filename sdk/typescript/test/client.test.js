@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
 
-import { IntegrationLabClient, IntegrationLabConfigError, sanitizeRoute } from "../dist/index.js";
+import {
+  IntegrationLabClient,
+  IntegrationLabConfigError,
+  MAX_RETRY_AFTER_MS,
+  parseRetryAfterMs,
+  sanitizeRoute,
+} from "../dist/index.js";
 
 const INTEGRATION_ID = "5c1e1b3a-1b2c-4d5e-8f90-123456789abc";
 const CREDENTIAL = `ilk_v1_0123456789ab_${"a".repeat(43)}`;
@@ -218,6 +224,108 @@ test("sanitizeRoute removes queries and identifiers", () => {
   assert.equal(route, "/v1/orders/{id}");
   assert.equal(route.includes("token"), false);
   assert.equal(route.includes("pw"), false);
+});
+
+test("honors Retry-After seconds without consuming the retry budget", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const lab = client(
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { status: 429, body: '{"detail":"slow down"}', headers: { "Retry-After": "2" } };
+      }
+      return { status: 200, body: '{"accepted":1,"duplicates":0}' };
+    },
+    {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  const result = await lab.flush(2000);
+  assert.equal(result.delivered, true);
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [2000]);
+  assert.equal(lab.stats.accepted, 1);
+  assert.equal(lab.stats.dropped, 0);
+  assert.equal(lab.stats.rateLimited, 1);
+  assert.equal(lab.stats.deliveryFailures, 0);
+  await lab.close();
+});
+
+test("honors Retry-After HTTP-date and caps the wait", async () => {
+  assert.equal(parseRetryAfterMs("2"), 2000);
+  const future = new Date(Date.now() + 500_000).toUTCString();
+  assert.ok(parseRetryAfterMs(future) >= 400_000);
+
+  let calls = 0;
+  const sleeps = [];
+  const lab = client(
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { status: 429, body: "", headers: { "Retry-After": future } };
+      }
+      return { status: 200, body: '{"accepted":1,"duplicates":0}' };
+    },
+    {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  await lab.flush(2000);
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [MAX_RETRY_AFTER_MS]);
+  assert.equal(lab.stats.rateLimited, 1);
+  assert.equal(lab.stats.accepted, 1);
+  await lab.close();
+});
+
+test("429 without Retry-After keeps exponential backoff", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const lab = client(
+    async () => {
+      calls += 1;
+      if (calls < 3) return { status: 429, body: "" };
+      return { status: 200, body: '{"accepted":1,"duplicates":0}' };
+    },
+    {
+      retryBackoffMs: 200,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  await lab.flush(2000);
+  assert.equal(calls, 3);
+  assert.deepEqual(sleeps, [200, 400]);
+  assert.equal(lab.stats.accepted, 1);
+  assert.equal(lab.stats.rateLimited, 0);
+  await lab.close();
 });
 
 test("rejects an operator key and loads server environment", async () => {
