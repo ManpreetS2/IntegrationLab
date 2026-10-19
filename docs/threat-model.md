@@ -40,7 +40,7 @@ GitHub Actions
 | Internet user calls operator APIs | Production requires a high-entropy `OPERATOR_API_KEY`; protected `/api/*` routes require Bearer auth |
 | Operator key leaked into frontend bundle | Key is entered at runtime and kept in `sessionStorage`; Vite build never receives it |
 | Static AWS access keys leak from GitHub | Deploy uses GitHub OIDC with immutable repo/environment subject |
-| OAuth CSRF / callback replay | State + PKCE; state is expiring, single-use, and validated before callback handling |
+| OAuth CSRF / callback replay | State + PKCE; state is expiring and claimed atomically after browser-nonce validation (before token exchange), so a failed exchange requires reconnect |
 | Stolen integration UUID replaces GitHub connection | Connect start is operator-gated; callback also requires the HttpOnly browser-nonce cookie minted at start |
 | OAuth token stolen from DB | Token encrypted with Fernet before persistence |
 | Forged Stripe webhook | Signature verified against the exact raw request body before durable receipt |
