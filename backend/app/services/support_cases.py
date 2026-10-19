@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.correlation import get_correlation_id, require_correlation_id, short_correlation_id
@@ -236,18 +237,42 @@ class SupportCaseService:
         )
         correlation_id = resolved.get("correlation_id") or require_correlation_id()
         label = payload.safe_label or resolved["safe_label"]
-        row = SupportCaseEvidenceORM(
-            id=uuid4(),
-            support_case_id=case.id,
-            evidence_type=payload.evidence_type.value,
-            evidence_id=payload.evidence_id,
-            safe_label=label[:255],
-            is_simulated=bool(resolved["is_simulated"]),
-            correlation_id=correlation_id,
-            pinned_at=datetime.now(timezone.utc),
+        row_id = uuid4()
+        pinned_at = datetime.now(timezone.utc)
+        is_simulated = bool(resolved["is_simulated"])
+        insert_stmt = (
+            pg_insert(SupportCaseEvidenceORM)
+            .values(
+                id=row_id,
+                support_case_id=case.id,
+                evidence_type=payload.evidence_type.value,
+                evidence_id=payload.evidence_id,
+                safe_label=label[:255],
+                is_simulated=is_simulated,
+                correlation_id=correlation_id,
+                pinned_at=pinned_at,
+            )
+            .on_conflict_do_nothing(constraint="uq_support_case_evidence_ref")
+            .returning(SupportCaseEvidenceORM.id)
         )
-        session.add(row)
-        case.updated_at = datetime.now(timezone.utc)
+        inserted_id = session.execute(insert_stmt).scalar_one_or_none()
+        if inserted_id is None:
+            # Lost the insert race; the winner's row is the durable pin.
+            existing = support_case_repository.find_evidence_ref(
+                session, case.id, payload.evidence_type.value, payload.evidence_id
+            )
+            if existing is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to pin evidence",
+                )
+            if commit:
+                session.commit()
+            return existing
+
+        row = session.get(SupportCaseEvidenceORM, inserted_id)
+        assert row is not None
+        case.updated_at = pinned_at
         self._add_history(
             session,
             case,

@@ -26,9 +26,22 @@ class IntegrationRepository:
         statement = select(IntegrationORM).order_by(IntegrationORM.created_at.asc())
         return list(session.scalars(statement).all())
 
-    def get_by_id(self, session: Session, integration_id: UUID) -> IntegrationORM | None:
+    def get_by_id(
+        self,
+        session: Session,
+        integration_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> IntegrationORM | None:
         """Fetch one integration by primary key, or None if missing."""
-        return session.get(IntegrationORM, integration_id)
+        if not for_update:
+            return session.get(IntegrationORM, integration_id)
+        statement = (
+            select(IntegrationORM)
+            .where(IntegrationORM.id == integration_id)
+            .with_for_update()
+        )
+        return session.scalars(statement).first()
 
     def create(
         self,
