@@ -20,7 +20,7 @@
     "test": "npm run build && node --test test/client.test.js"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
+    "@types/node": "^26.6.5",
     "typescript": "^5.7.2"
   }
 }
