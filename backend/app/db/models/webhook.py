@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -33,6 +34,12 @@ class WebhookEventORM(Base):
             "provider_event_id",
             name="uq_webhook_events_integration_provider_event",
         ),
+        Index(
+            "ix_webhook_events_status_next_attempt",
+            "processing_status",
+            "next_attempt_at",
+        ),
+        Index("ix_webhook_events_first_received_at", "first_received_at"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -89,6 +96,9 @@ class WebhookProcessingAttemptORM(Base):
             "attempt_number",
             name="uq_webhook_attempts_event_attempt_number",
         ),
+        # Migration name (not the SQLAlchemy default ix_*_webhook_event_id).
+        Index("ix_webhook_processing_attempts_event_id", "webhook_event_id"),
+        Index("ix_webhook_processing_attempts_correlation_id", "correlation_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -96,7 +106,6 @@ class WebhookProcessingAttemptORM(Base):
         PGUUID(as_uuid=True),
         ForeignKey("webhook_events.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
     retry_cycle: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -122,6 +131,8 @@ class WebhookEffectORM(Base):
             "effect_key",
             name="uq_webhook_effects_event_effect_key",
         ),
+        # Migration name (not the SQLAlchemy default ix_*_webhook_event_id).
+        Index("ix_webhook_effects_event_id", "webhook_event_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -129,7 +140,6 @@ class WebhookEffectORM(Base):
         PGUUID(as_uuid=True),
         ForeignKey("webhook_events.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     effect_key: Mapped[str] = mapped_column(String(255), nullable=False)
     effect_type: Mapped[str] = mapped_column(String(64), nullable=False)

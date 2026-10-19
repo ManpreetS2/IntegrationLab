@@ -8,7 +8,7 @@ Python/Pydantic enums still enforce allowed values at the API layer.
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Date, DateTime, String, func
+from sqlalchemy import Date, DateTime, Index, String, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +19,7 @@ class IntegrationORM(Base):
     """Database row representing one partner integration."""
 
     __tablename__ = "integrations"
+    __table_args__ = (Index("ix_integrations_environment", "environment"),)
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),

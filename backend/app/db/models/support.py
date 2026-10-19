@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -22,7 +23,14 @@ class SupportCaseORM(Base):
     """First-class operational investigation case (not a log row)."""
 
     __tablename__ = "support_cases"
-    __table_args__ = (UniqueConstraint("case_number", name="uq_support_cases_case_number"),)
+    __table_args__ = (
+        UniqueConstraint("case_number", name="uq_support_cases_case_number"),
+        Index("ix_support_cases_status", "status"),
+        Index("ix_support_cases_severity", "severity"),
+        Index("ix_support_cases_environment", "environment"),
+        Index("ix_support_cases_opened_at", "opened_at"),
+        Index("ix_support_cases_correlation_id", "correlation_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     case_number: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -66,6 +74,9 @@ class SupportCaseHistoryORM(Base):
     """Immutable case lifecycle / field-change history."""
 
     __tablename__ = "support_case_history"
+    __table_args__ = (
+        Index("ix_support_case_history_case_created", "support_case_id", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     support_case_id: Mapped[UUID] = mapped_column(
@@ -89,6 +100,9 @@ class SupportCaseNoteORM(Base):
     """Operator note / update on a support case."""
 
     __tablename__ = "support_case_notes"
+    __table_args__ = (
+        Index("ix_support_case_notes_case_created", "support_case_id", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     support_case_id: Mapped[UUID] = mapped_column(
@@ -116,6 +130,7 @@ class SupportCaseEvidenceORM(Base):
             "evidence_id",
             name="uq_support_case_evidence_ref",
         ),
+        Index("ix_support_case_evidence_case_pinned", "support_case_id", "pinned_at"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -140,6 +155,13 @@ class OperatorAuditEventORM(Base):
     """Append-oriented operator action audit (not application debug logs)."""
 
     __tablename__ = "operator_audit_events"
+    __table_args__ = (
+        Index("ix_operator_audit_events_created_at", "created_at"),
+        Index("ix_operator_audit_events_action", "action"),
+        Index("ix_operator_audit_events_integration_id", "integration_id"),
+        Index("ix_operator_audit_events_support_case_id", "support_case_id"),
+        Index("ix_operator_audit_events_correlation_id", "correlation_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     action: Mapped[str] = mapped_column(String(64), nullable=False)

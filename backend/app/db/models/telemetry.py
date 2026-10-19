@@ -13,9 +13,11 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
+    desc,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -46,6 +48,7 @@ class IngestionCredentialORM(Base):
     __table_args__ = (
         UniqueConstraint("key_prefix", name="uq_ingestion_credentials_key_prefix"),
         UniqueConstraint("secret_hash", name="uq_ingestion_credentials_secret_hash"),
+        Index("ix_ingestion_credentials_integration_id", "integration_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -98,6 +101,36 @@ class TelemetryEventORM(Base):
             name="ck_telemetry_events_environment",
         ),
         CheckConstraint(_OUTCOME_CHECK, name="ck_telemetry_events_outcome"),
+        Index(
+            "ix_telemetry_events_latest",
+            "integration_id",
+            desc("occurred_at"),
+            desc("event_id"),
+        ),
+        Index(
+            "ix_telemetry_events_page",
+            "integration_id",
+            desc("received_at"),
+            desc("event_id"),
+        ),
+        Index(
+            "ix_telemetry_events_service",
+            "integration_id",
+            "service",
+            desc("occurred_at"),
+        ),
+        Index(
+            "ix_telemetry_events_category",
+            "integration_id",
+            "error_category",
+            desc("occurred_at"),
+        ),
+        Index(
+            "ix_telemetry_events_status",
+            "integration_id",
+            "status_code",
+            desc("occurred_at"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
