@@ -99,7 +99,7 @@ Rules:
 | Diagnostics | In-flight "running" row commits first (lock). Completion checks + audit share the **final** commit |
 | Webhook retry/dismiss | Status change + audit in one commit |
 | Webhook process / process-due | **Intent audit committed first** (`*_requested`); processor keeps its own multi-transaction design; attempts inherit ContextVar correlation |
-| GitHub connect | Best-effort `github_connect_requested` when integration exists (`browser_handoff`); audit failure must not block OAuth redirect |
+| GitHub connect | Best-effort `github_connect_requested` when integration exists (`actor_type=operator`); audit failure must not block OAuth start |
 
 ## Evidence pinning
 

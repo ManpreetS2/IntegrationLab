@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
 
-import { IntegrationLabClient, IntegrationLabConfigError, sanitizeRoute } from "../dist/index.js";
+import {
+  IntegrationLabClient,
+  IntegrationLabConfigError,
+  MAX_RATE_LIMITED_ATTEMPTS,
+  MAX_RETRY_AFTER_MS,
+  MIN_RETRY_AFTER_MS,
+  parseRetryAfterMs,
+  sanitizeRoute,
+} from "../dist/index.js";
 
 const INTEGRATION_ID = "5c1e1b3a-1b2c-4d5e-8f90-123456789abc";
 const CREDENTIAL = `ilk_v1_0123456789ab_${"a".repeat(43)}`;
@@ -220,6 +228,187 @@ test("sanitizeRoute removes queries and identifiers", () => {
   assert.equal(route.includes("pw"), false);
 });
 
+test("honors Retry-After seconds without consuming the retry budget", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const lab = client(
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { status: 429, body: '{"detail":"slow down"}', headers: { "Retry-After": "2" } };
+      }
+      return { status: 200, body: '{"accepted":1,"duplicates":0}' };
+    },
+    {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  const result = await lab.flush(2000);
+  assert.equal(result.delivered, true);
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [2000]);
+  assert.equal(lab.stats.accepted, 1);
+  assert.equal(lab.stats.dropped, 0);
+  assert.equal(lab.stats.rateLimited, 1);
+  assert.equal(lab.stats.deliveryFailures, 0);
+  await lab.close();
+});
+
+test("honors Retry-After HTTP-date and caps the wait", async () => {
+  assert.equal(parseRetryAfterMs("2"), 2000);
+  const future = new Date(Date.now() + 500_000).toUTCString();
+  assert.ok(parseRetryAfterMs(future) >= 400_000);
+
+  let calls = 0;
+  const sleeps = [];
+  const lab = client(
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { status: 429, body: "", headers: { "Retry-After": future } };
+      }
+      return { status: 200, body: '{"accepted":1,"duplicates":0}' };
+    },
+    {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  await lab.flush(2000);
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [MAX_RETRY_AFTER_MS]);
+  assert.equal(lab.stats.rateLimited, 1);
+  assert.equal(lab.stats.accepted, 1);
+  await lab.close();
+});
+
+test("parseRetryAfterMs rejects junk and oversized digit strings", () => {
+  assert.equal(parseRetryAfterMs("2"), 2000);
+  assert.equal(parseRetryAfterMs("0"), 0);
+  assert.equal(parseRetryAfterMs("-5"), null);
+  assert.equal(parseRetryAfterMs("1.5"), null);
+  assert.equal(parseRetryAfterMs("abc 2"), null);
+  assert.equal(parseRetryAfterMs("²"), null);
+  assert.equal(parseRetryAfterMs("1".repeat(11)), null);
+  assert.equal(parseRetryAfterMs("1".repeat(400)), null);
+  assert.equal(parseRetryAfterMs("not-a-date"), null);
+});
+
+test("repeated Retry-After eventually drops the batch", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const lab = client(
+    async () => {
+      calls += 1;
+      return { status: 429, body: "", headers: { "Retry-After": "0" } };
+    },
+    {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  const result = await lab.flush(2000);
+  assert.equal(calls, MAX_RATE_LIMITED_ATTEMPTS);
+  assert.equal(sleeps.length, MAX_RATE_LIMITED_ATTEMPTS - 1);
+  assert.ok(sleeps.every((ms) => ms === MIN_RETRY_AFTER_MS));
+  assert.equal(lab.stats.dropped, 1);
+  assert.equal(lab.stats.accepted, 0);
+  assert.equal(lab.stats.rateLimited, MAX_RATE_LIMITED_ATTEMPTS);
+  assert.equal(lab.stats.deliveryFailures, 1);
+  assert.equal(result.lastError, "http_429");
+  await lab.close();
+});
+
+test("close stops the Retry-After retry loop", async () => {
+  let calls = 0;
+  let resolveSleep;
+  const firstSleep = new Promise((resolve) => {
+    resolveSleep = resolve;
+  });
+  const lab = client(
+    async () => {
+      calls += 1;
+      return { status: 429, body: "", headers: { "Retry-After": "60" } };
+    },
+    {
+      sleep: async () => {
+        await firstSleep;
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  await waitFor(() => calls >= 1);
+  const closePromise = lab.close(500);
+  resolveSleep();
+  await closePromise;
+  const callsAtClose = calls;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(calls <= callsAtClose + 1);
+  assert.ok(lab.stats.dropped >= 1);
+});
+
+test("429 without Retry-After keeps exponential backoff", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const lab = client(
+    async () => {
+      calls += 1;
+      if (calls < 3) return { status: 429, body: "" };
+      return { status: 200, body: '{"accepted":1,"duplicates":0}' };
+    },
+    {
+      retryBackoffMs: 200,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    },
+  );
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  await lab.flush(2000);
+  assert.equal(calls, 3);
+  assert.deepEqual(sleeps, [200, 400]);
+  assert.equal(lab.stats.accepted, 1);
+  assert.equal(lab.stats.rateLimited, 0);
+  await lab.close();
+});
+
 test("rejects an operator key and loads server environment", async () => {
   assert.throws(
     () =>
@@ -314,6 +503,90 @@ test("delivers to a local HTTP server and preserves the upstream result", async 
     await lab.close();
     ingest.close();
     upstream.close();
+  }
+});
+
+test("close flushes a multi-batch queue", async () => {
+  const calls = [];
+  const lab = client(
+    async (url, body) => {
+      const n = JSON.parse(body).events.length;
+      calls.push(n);
+      return {
+        status: 200,
+        body: JSON.stringify({ accepted: n, duplicates: 0, results: [] }),
+      };
+    },
+    { batchSize: 10 },
+  );
+  for (let i = 0; i < 25; i += 1) {
+    assert.equal(
+      lab.recordHttp({
+        service: "orders-api",
+        method: "GET",
+        routeTemplate: "/health",
+        statusCode: 200,
+        durationMs: 1,
+      }),
+      true,
+    );
+  }
+  const result = await lab.close(5000);
+  assert.equal(result.accepted, 25);
+  assert.equal(result.dropped, 0);
+  assert.equal(lab.stats.dropped, 0);
+  assert.equal(result.delivered, true);
+  assert.deepEqual(calls, [10, 10, 5]);
+});
+
+test("close during Retry-After returns promptly", async () => {
+  let calls = 0;
+  const lab = client(async () => {
+    calls += 1;
+    return { status: 429, body: "", headers: { "Retry-After": "60" } };
+  });
+  lab.recordHttp({
+    service: "orders-api",
+    method: "GET",
+    routeTemplate: "/health",
+    statusCode: 200,
+    durationMs: 1,
+  });
+  await waitFor(() => calls >= 1);
+  const started = Date.now();
+  await lab.close(2000);
+  assert.ok(Date.now() - started < 2000);
+  assert.ok(lab.stats.dropped >= 1);
+});
+
+test("warns once for plain HTTP to a non-loopback host", () => {
+  const messages = [];
+  const original = console.warn;
+  console.warn = (message) => {
+    messages.push(String(message));
+  };
+  try {
+    client(ok, { baseUrl: "http://telemetry.example.com" });
+    assert.equal(messages.length, 1);
+    assert.match(messages[0], /plain HTTP/i);
+  } finally {
+    console.warn = original;
+  }
+});
+
+test("does not warn for HTTPS or loopback HTTP", () => {
+  const messages = [];
+  const original = console.warn;
+  console.warn = (message) => {
+    messages.push(String(message));
+  };
+  try {
+    client(ok, { baseUrl: "https://telemetry.example.com" });
+    client(ok, { baseUrl: "http://127.0.0.1:8010" });
+    client(ok, { baseUrl: "http://localhost:8010" });
+    assert.equal(messages.length, 0);
+  } finally {
+    console.warn = original;
   }
 });
 

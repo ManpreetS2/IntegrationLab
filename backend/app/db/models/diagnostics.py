@@ -3,7 +3,16 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +23,11 @@ class DiagnosticRunORM(Base):
     """One operator-triggered diagnostic run for an integration."""
 
     __tablename__ = "diagnostic_runs"
+    __table_args__ = (
+        Index("ix_diagnostic_runs_integration_started", "integration_id", "started_at"),
+        Index("ix_diagnostic_runs_started_at", "started_at"),
+        Index("ix_diagnostic_runs_correlation_id", "correlation_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     integration_id: Mapped[UUID] = mapped_column(
@@ -39,6 +53,7 @@ class DiagnosticCheckORM(Base):
         UniqueConstraint(
             "diagnostic_run_id", "check_code", name="uq_diagnostic_checks_run_check_code"
         ),
+        Index("ix_diagnostic_checks_run_id", "diagnostic_run_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)

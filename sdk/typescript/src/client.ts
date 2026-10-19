@@ -9,6 +9,15 @@ export const SDK_VERSION = "0.1.0";
 const ENVIRONMENTS = new Set(["local", "test", "staging", "production"]);
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 const DROP_STATUSES = new Set([400, 401, 403, 413, 422]);
+const RETRY_AFTER_STATUSES = new Set([429, 503]);
+export const MAX_RETRY_AFTER_MS = 120_000;
+/** Floor when Retry-After is 0 / a past HTTP-date — avoids a busy spin. */
+export const MIN_RETRY_AFTER_MS = 50;
+/** Separate budget so Retry-After waits cannot loop forever. */
+export const MAX_RATE_LIMITED_ATTEMPTS = 5;
+const RETRY_AFTER_SECONDS_RE = /^[0-9]{1,10}$/;
+/** IMF-fixdate (RFC 7231), e.g. Sun, 06 Nov 1994 08:49:37 GMT */
+const IMF_FIXDATE_RE = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 
 export class IntegrationLabConfigError extends Error {
   constructor(message: string) {
@@ -24,6 +33,7 @@ export interface ClientStats {
   accepted: number;
   duplicates: number;
   deliveryFailures: number;
+  rateLimited: number;
 }
 
 export interface FlushResult {
@@ -46,12 +56,18 @@ export interface HttpObservationInput {
   environment?: string;
 }
 
+export type TransportResult = {
+  status: number;
+  body: string;
+  headers?: Record<string, string>;
+};
+
 export type Transport = (
   url: string,
   body: string,
   headers: Record<string, string>,
   timeoutMs: number,
-) => Promise<{ status: number; body: string }>;
+) => Promise<TransportResult>;
 
 export type InstrumentedRequestInit = RequestInit & {
   integrationlabRouteTemplate?: string;
@@ -69,6 +85,8 @@ export interface ClientConfig {
   retryBackoffMs?: number;
   transport?: Transport;
   fetchImpl?: typeof fetch;
+  /** Injectable sleep for tests (milliseconds). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface EventBody {
@@ -95,6 +113,7 @@ export class IntegrationLabClient {
     accepted: 0,
     duplicates: 0,
     deliveryFailures: 0,
+    rateLimited: 0,
   };
 
   private readonly baseUrl: string;
@@ -107,10 +126,14 @@ export class IntegrationLabClient {
   private readonly maxRetries: number;
   private readonly retryBackoffMs: number;
   private readonly transport: Transport;
+  private readonly sleepFn: (ms: number) => Promise<void>;
+  private readonly customSleep: boolean;
   private readonly buffer: EventBody[] = [];
   private tail: Promise<void> = Promise.resolve();
+  private closing = false;
   private stopped = false;
   private lastError: string | null = null;
+  private activeDelay: { cancel: () => void } | null = null;
 
   constructor(config: ClientConfig) {
     assertServerSide();
@@ -137,9 +160,12 @@ export class IntegrationLabClient {
     this.maxRetries = config.maxRetries ?? 3;
     this.retryBackoffMs = config.retryBackoffMs ?? 200;
     this.transport = config.transport ?? defaultTransport(config.fetchImpl ?? fetch);
+    this.customSleep = config.sleep !== undefined;
+    this.sleepFn = config.sleep ?? sleep;
     if (this.timeoutMs <= 0 || this.maxQueue < 1 || this.batchSize < 1 || this.maxRetries < 1) {
       throw new IntegrationLabConfigError("timeout, queue, batch size, and retries must be positive");
     }
+    warnPlainHttpIfNeeded(parsed);
   }
 
   static fromEnv(env: NodeJS.ProcessEnv = process.env, overrides: Partial<ClientConfig> = {}): IntegrationLabClient {
@@ -166,7 +192,7 @@ export class IntegrationLabClient {
       this.stats.rejected += 1;
       return false;
     }
-    if (this.stopped || this.buffer.length >= this.maxQueue) {
+    if (this.closing || this.stopped || this.buffer.length >= this.maxQueue) {
       this.stats.dropped += 1;
       return false;
     }
@@ -240,6 +266,12 @@ export class IntegrationLabClient {
   }
 
   async close(timeoutMs = 5000): Promise<FlushResult> {
+    // Closing rejects new records and wakes in-flight Retry-After/backoff waits
+    // (drop that one batch) while still draining not-yet-attempted batches.
+    this.closing = true;
+    this.activeDelay?.cancel();
+    this.activeDelay = null;
+    this.tail = this.tail.then(() => this.drain()).catch(() => undefined);
     const result = await this.flush(timeoutMs);
     this.stopped = true;
     return result;
@@ -258,8 +290,29 @@ export class IntegrationLabClient {
     }
   }
 
+  private async waitOrStop(ms: number): Promise<boolean> {
+    if (this.closing || this.stopped) return true;
+    if (this.customSleep) {
+      await this.sleepFn(ms);
+      return this.closing || this.stopped;
+    }
+    const handle = delay(ms);
+    this.activeDelay = handle;
+    try {
+      await handle.promise;
+    } finally {
+      if (this.activeDelay === handle) this.activeDelay = null;
+    }
+    return this.closing || this.stopped;
+  }
+
   private async deliver(batch: EventBody[]): Promise<void> {
-    for (let attempt = 0; attempt < this.maxRetries; attempt += 1) {
+    let attempt = 0;
+    let rateLimitedAttempts = 0;
+    while (attempt < this.maxRetries) {
+      // Fully stopped clients abort; ``closing`` still allows delivery of
+      // not-yet-attempted batches (in-flight Retry-After aborts via waitOrStop).
+      if (this.stopped) break;
       try {
         const response = await this.transport(
           `${this.baseUrl}/api/telemetry/v1/events`,
@@ -283,11 +336,25 @@ export class IntegrationLabClient {
           this.stats.rejected += batch.length;
           return;
         }
+        if (RETRY_AFTER_STATUSES.has(response.status)) {
+          const retryAfterMs = parseRetryAfterMs(headerValue(response.headers, "Retry-After"));
+          if (retryAfterMs !== null) {
+            rateLimitedAttempts += 1;
+            this.stats.rateLimited += 1;
+            if (rateLimitedAttempts >= MAX_RATE_LIMITED_ATTEMPTS) {
+              break;
+            }
+            const waitMs = Math.min(Math.max(retryAfterMs, MIN_RETRY_AFTER_MS), MAX_RETRY_AFTER_MS);
+            if (await this.waitOrStop(waitMs)) break;
+            continue;
+          }
+        }
       } catch {
         this.lastError = "transport_error";
       }
-      if (attempt + 1 < this.maxRetries && this.retryBackoffMs > 0) {
-        await sleep(this.retryBackoffMs * 2 ** attempt);
+      attempt += 1;
+      if (attempt < this.maxRetries && this.retryBackoffMs > 0) {
+        if (await this.waitOrStop(this.retryBackoffMs * 2 ** (attempt - 1))) break;
       }
     }
     this.stats.dropped += batch.length;
@@ -376,6 +443,29 @@ function ackCounts(body: string, batchSize: number): { accepted: number; duplica
   }
 }
 
+export function parseRetryAfterMs(value: string | null | undefined, nowMs: number = Date.now()): number | null {
+  /** Accept only plain non-negative integer seconds (≤10 digits) or IMF-fixdate. */
+  if (value === null || value === undefined) return null;
+  const text = value.trim();
+  if (!text) return null;
+  if (RETRY_AFTER_SECONDS_RE.test(text)) {
+    return Number.parseInt(text, 10) * 1000;
+  }
+  if (!IMF_FIXDATE_RE.test(text)) return null;
+  const when = Date.parse(text);
+  if (Number.isNaN(when)) return null;
+  return Math.max(0, when - nowMs);
+}
+
+function headerValue(headers: Record<string, string> | undefined, name: string): string | null {
+  if (!headers) return null;
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return null;
+}
+
 function defaultTransport(fetchImpl: typeof fetch): Transport {
   return async (url, body, headers, timeoutMs) => {
     const response = await fetchImpl(url, {
@@ -385,7 +475,11 @@ function defaultTransport(fetchImpl: typeof fetch): Transport {
       signal: AbortSignal.timeout(timeoutMs),
     });
     const text = await response.text();
-    return { status: response.status, body: text.slice(0, 2048) };
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      responseHeaders[key] = value;
+    });
+    return { status: response.status, body: text.slice(0, 2048), headers: responseHeaders };
   };
 }
 
@@ -400,6 +494,39 @@ function parseBaseUrl(value: string): string {
     throw new IntegrationLabConfigError("baseUrl must be an http or https URL");
   }
   return value.replace(/\/+$/, "");
+}
+
+const PLAIN_HTTP_WARNING =
+  "IntegrationLab baseUrl uses plain HTTP to a non-loopback host; prefer HTTPS in production.";
+
+function isLoopbackHost(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost" || lower === "::1") {
+    return true;
+  }
+  if (lower.includes(".")) {
+    const octets = lower.split(".");
+    if (octets.length === 4 && octets[0] === "127") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function warnPlainHttpIfNeeded(baseUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return;
+  }
+  if (url.protocol !== "http:") {
+    return;
+  }
+  if (isLoopbackHost(url.hostname)) {
+    return;
+  }
+  console.warn(PLAIN_HTTP_WARNING);
 }
 
 function isUuid(value: string): boolean {
@@ -428,9 +555,26 @@ function sleep(ms: number): Promise<void> {
 }
 
 function delay(ms: number): { promise: Promise<void>; cancel: () => void } {
-  let timer: ReturnType<typeof setTimeout>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let resolveFn: (() => void) | undefined;
+  let settled = false;
   const promise = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, ms);
+    resolveFn = resolve;
+    timer = setTimeout(() => {
+      settled = true;
+      resolve();
+    }, ms);
+    // Allow Node to exit while a Retry-After wait is outstanding.
+    timer.unref?.();
   });
-  return { promise, cancel: () => clearTimeout(timer) };
+  return {
+    promise,
+    cancel: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      if (!settled && resolveFn) {
+        settled = true;
+        resolveFn();
+      }
+    },
+  };
 }

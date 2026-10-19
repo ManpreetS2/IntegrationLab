@@ -644,19 +644,18 @@ def test_github_connect_requested_audit_semantics(
 ):
     before = db_session.query(OperatorAuditEventORM).count()
     correlation = str(uuid4())
-    response = client.get(
+    response = client.post(
         f"/api/integrations/{github_integration_id}/github/connect",
         headers={"X-Correlation-ID": correlation},
-        follow_redirects=False,
     )
-    assert response.status_code in {302, 307}
-    assert "github.com" in response.headers.get("location", "")
+    assert response.status_code == 200
+    assert "github.com" in response.json().get("authorize_url", "")
 
     audit = client.get("/api/audit-events", params={"correlation_id": correlation}).json()
     assert len(audit) == 1
     row = audit[0]
     assert row["action"] == "github_connect_requested"
-    assert row["actor_type"] == "browser_handoff"
+    assert row["actor_type"] == "operator"
     assert row["correlation_id"] == correlation
     assert row["integration_id"] == github_integration_id
     assert row["metadata"] == {"provider": "github"}
@@ -672,16 +671,14 @@ def test_github_connect_requested_audit_semantics(
         assert forbidden not in blob
 
     # Missing integration → no audit row.
-    missing = client.get(
+    missing = client.post(
         "/api/integrations/00000000-0000-0000-0000-000000000099/github/connect",
-        follow_redirects=False,
     )
     assert missing.status_code == 404
 
     # Wrong provider → rejected, no GitHub connect audit.
-    wrong = client.get(
+    wrong = client.post(
         f"/api/integrations/{stripe_integration_id}/github/connect",
-        follow_redirects=False,
     )
     assert wrong.status_code == 400
     db_session.expire_all()

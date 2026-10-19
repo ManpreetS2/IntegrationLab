@@ -85,7 +85,9 @@ class IngestionCredentialService:
         label: str | None,
         correlation_id: UUID | None,
     ) -> IngestionCredentialCreated:
-        integration = self._require_instrumented(session, integration_id)
+        # Lock the integration row so concurrent creates cannot all pass the
+        # active-cap check before any insert commits.
+        integration = self._require_instrumented(session, integration_id, for_update=True)
         if repo.count_active(session, integration.id) >= MAX_ACTIVE_CREDENTIALS:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -125,8 +127,10 @@ class IngestionCredentialService:
         label: str | None,
         correlation_id: UUID | None,
     ) -> IngestionCredentialCreated:
-        integration = self._require_instrumented(session, integration_id)
-        current = self._require_owned(session, integration.id, credential_id)
+        integration = self._require_instrumented(session, integration_id, for_update=True)
+        current = self._require_owned(
+            session, integration.id, credential_id, for_update=True
+        )
         if current.revoked_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -174,8 +178,10 @@ class IngestionCredentialService:
         *,
         correlation_id: UUID | None,
     ) -> IngestionCredentialView:
-        integration = self._require_instrumented(session, integration_id)
-        current = self._require_owned(session, integration.id, credential_id)
+        integration = self._require_instrumented(session, integration_id, for_update=True)
+        current = self._require_owned(
+            session, integration.id, credential_id, for_update=True
+        )
         if current.revoked_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -216,8 +222,16 @@ class IngestionCredentialService:
             for row in repo.list_for_integration(session, integration.id)
         ]
 
-    def _require_instrumented(self, session: Session, integration_id: UUID) -> IntegrationORM:
-        integration = integration_repository.get_by_id(session, integration_id)
+    def _require_instrumented(
+        self,
+        session: Session,
+        integration_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> IntegrationORM:
+        integration = integration_repository.get_by_id(
+            session, integration_id, for_update=for_update
+        )
         if integration is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration not found")
         if integration.provider != IntegrationProvider.INSTRUMENTED_HTTP.value:
@@ -228,9 +242,14 @@ class IngestionCredentialService:
         return integration
 
     def _require_owned(
-        self, session: Session, integration_id: UUID, credential_id: UUID
+        self,
+        session: Session,
+        integration_id: UUID,
+        credential_id: UUID,
+        *,
+        for_update: bool = False,
     ) -> IngestionCredentialORM:
-        row = repo.get(session, credential_id)
+        row = repo.get(session, credential_id, for_update=for_update)
         if row is None or row.integration_id != integration_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

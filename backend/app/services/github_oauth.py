@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from starlette.responses import RedirectResponse
+from starlette.requests import Request
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from app.core.config import Settings, get_settings
 from app.core.security import (
@@ -20,6 +22,7 @@ from app.core.security import (
     hash_oauth_state,
 )
 from app.db.models.integration import IntegrationORM
+from app.db.models.oauth import OAuthSessionORM
 from app.models.github import GitHubCheckResponse, GitHubConnectionResponse
 from app.models.integration import IntegrationProvider, IntegrationStatus
 from app.repositories.integrations import integration_repository
@@ -33,6 +36,14 @@ from app.services.github_client import GitHubClient
 logger = logging.getLogger(__name__)
 
 OAUTH_SESSION_TTL = timedelta(minutes=10)
+BROWSER_NONCE_COOKIE_PREFIX = "il_gh_nonce_"
+BROWSER_NONCE_COOKIE_PATH = "/api/oauth/github"
+BROWSER_NONCE_MAX_AGE = int(OAUTH_SESSION_TTL.total_seconds())
+
+
+def browser_nonce_cookie_name(state: str) -> str:
+    """Cookie name scoped to one OAuth state so parallel tabs do not clobber each other."""
+    return f"{BROWSER_NONCE_COOKIE_PREFIX}{hash_oauth_state(state)[:16]}"
 
 
 class GitHubOAuthService:
@@ -64,12 +75,34 @@ class GitHubOAuthService:
             )
         return integration
 
-    def start_connect(self, session: Session, integration_id: UUID) -> RedirectResponse:
-        """Create OAuth session and redirect the browser to GitHub."""
+    def _set_browser_nonce_cookie(self, response: Response, *, nonce: str, state: str) -> None:
+        response.set_cookie(
+            key=browser_nonce_cookie_name(state),
+            value=nonce,
+            max_age=BROWSER_NONCE_MAX_AGE,
+            path=BROWSER_NONCE_COOKIE_PATH,
+            httponly=True,
+            samesite="lax",
+            secure=self.settings.is_production(),
+        )
+
+    def _clear_browser_nonce_cookie(self, response: Response, *, state: str) -> None:
+        response.delete_cookie(
+            key=browser_nonce_cookie_name(state),
+            path=BROWSER_NONCE_COOKIE_PATH,
+        )
+
+    def _begin_oauth_session(
+        self,
+        session: Session,
+        integration_id: UUID,
+    ) -> tuple[str, str, str]:
+        """Create a bound OAuth session; return (authorize_url, browser_nonce, state)."""
         self.require_oauth_config()
         integration = self._load_github_integration(session, integration_id)
 
         state = generate_oauth_state()
+        browser_nonce = secrets.token_urlsafe(32)
         code_verifier, code_challenge = generate_pkce_pair()
         cipher = TokenCipher()
         expires_at = datetime.now(timezone.utc) + OAUTH_SESSION_TTL
@@ -81,6 +114,7 @@ class GitHubOAuthService:
             state_hash=hash_oauth_state(state),
             code_verifier_encrypted=cipher.encrypt(code_verifier),
             expires_at=expires_at,
+            browser_nonce_hash=hash_oauth_state(browser_nonce),
         )
         session.commit()
 
@@ -89,38 +123,23 @@ class GitHubOAuthService:
             state=state,
             code_challenge=code_challenge,
         )
-        return RedirectResponse(url=authorize_url, status_code=status.HTTP_302_FOUND)
+        return authorize_url, browser_nonce, state
 
-    def handle_callback(
+    def start_connect_json(self, session: Session, integration_id: UUID) -> JSONResponse:
+        """Operator-authenticated start: return authorize_url and set the browser nonce cookie."""
+        authorize_url, browser_nonce, state = self._begin_oauth_session(session, integration_id)
+        response = JSONResponse({"authorize_url": authorize_url})
+        self._set_browser_nonce_cookie(response, nonce=browser_nonce, state=state)
+        return response
+
+    def _require_bound_oauth_session(
         self,
         session: Session,
         *,
-        code: str | None,
-        state: str | None,
-        error: str | None = None,
-        error_description: str | None = None,
-    ) -> RedirectResponse:
-        """Validate OAuth session, exchange code, fetch /user, persist connection.
-
-        GitHub may redirect with error=access_denied when the user cancels.
-        We never surface raw error_description to the frontend.
-        """
-        # User cancelled / denied — redirect safely without creating credentials.
-        if error:
-            return self._handle_oauth_error(
-                session,
-                state=state,
-                error=error,
-                error_description=error_description,
-            )
-
-        self.require_oauth_config()
-        if not code or not state:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing OAuth code or state",
-            )
-
+        state: str,
+        request: Request,
+    ) -> OAuthSessionORM:
+        """Load a usable OAuth session and enforce the start-time browser nonce."""
         oauth_session = oauth_session_repository.get_by_state_hash(
             session,
             hash_oauth_state(state),
@@ -140,6 +159,66 @@ class GitHubOAuthService:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at < now:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OAuth state expired")
+
+        expected_hash = oauth_session.browser_nonce_hash
+        provided = request.cookies.get(browser_nonce_cookie_name(state))
+        provided_hash = hash_oauth_state(provided) if provided else ""
+        if (
+            not expected_hash
+            or not provided
+            or len(provided_hash) != len(expected_hash)
+            or not secrets.compare_digest(provided_hash, expected_hash)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth browser binding missing or invalid",
+            )
+        # Consume state only after the browser nonce matches, so a missing
+        # cookie cannot burn a valid session. Commit before outbound GitHub
+        # calls so a concurrent callback cannot also claim the same state.
+        claimed = oauth_session_repository.claim_unused(session, oauth_session, now=now)
+        if claimed is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth state already used",
+            )
+        session.commit()
+        return claimed
+
+    def handle_callback(
+        self,
+        session: Session,
+        *,
+        request: Request,
+        code: str | None,
+        state: str | None,
+        error: str | None = None,
+        error_description: str | None = None,
+    ) -> RedirectResponse:
+        """Validate OAuth session, exchange code, fetch /user, persist connection.
+
+        GitHub may redirect with error=access_denied when the user cancels.
+        We never surface raw error_description to the frontend.
+        """
+        # User cancelled / denied — redirect safely without creating credentials.
+        if error:
+            return self._handle_oauth_error(
+                session,
+                request=request,
+                state=state,
+                error=error,
+                error_description=error_description,
+            )
+
+        self.require_oauth_config()
+        if not code or not state:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing OAuth code or state",
+            )
+
+        oauth_session = self._require_bound_oauth_session(session, state=state, request=request)
+        now = datetime.now(timezone.utc)
 
         integration = self._load_github_integration(session, oauth_session.integration_id)
 
@@ -237,15 +316,18 @@ class GitHubOAuthService:
 
         logger.info("GitHub OAuth connected for integration %s", integration.id)
         query = urlencode({"oauth": "github", "status": "connected"})
-        return RedirectResponse(
+        response = RedirectResponse(
             url=f"{self.settings.frontend_url.rstrip('/')}/?{query}",
             status_code=status.HTTP_302_FOUND,
         )
+        self._clear_browser_nonce_cookie(response, state=state)
+        return response
 
     def _handle_oauth_error(
         self,
         session: Session,
         *,
+        request: Request,
         state: str | None,
         error: str,
         error_description: str | None,
@@ -253,7 +335,8 @@ class GitHubOAuthService:
         """Handle GitHub OAuth denial/cancel without exposing raw descriptions.
 
         Only treat the callback as one of our initiated flows when `state` is
-        present, known, unused, unexpired, and provider=github. Otherwise 400.
+        present, known, unused, unexpired, provider=github, and the browser
+        nonce cookie matches the session. Otherwise 400.
         """
         # Never echo GitHub's error_description to the browser or API clients.
         _ = error_description
@@ -264,29 +347,7 @@ class GitHubOAuthService:
                 detail="Invalid OAuth state",
             )
 
-        oauth_session = oauth_session_repository.get_by_state_hash(
-            session,
-            hash_oauth_state(state),
-        )
-        if oauth_session is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
-        if oauth_session.provider != IntegrationProvider.GITHUB.value:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
-        if oauth_session.used_at is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth state already used",
-            )
-
-        now = datetime.now(timezone.utc)
-        expires_at = oauth_session.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at < now:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OAuth state expired")
-
-        oauth_session_repository.mark_used(session, oauth_session)
-        session.commit()
+        oauth_session = self._require_bound_oauth_session(session, state=state, request=request)
         logger.info(
             "GitHub OAuth cancelled for integration %s (error=%s)",
             oauth_session.integration_id,
@@ -295,10 +356,12 @@ class GitHubOAuthService:
 
         redirect_status = "cancelled" if error == "access_denied" else "error"
         query = urlencode({"oauth": "github", "status": redirect_status})
-        return RedirectResponse(
+        response = RedirectResponse(
             url=f"{self.settings.frontend_url.rstrip('/')}/?{query}",
             status_code=status.HTTP_302_FOUND,
         )
+        self._clear_browser_nonce_cookie(response, state=state)
+        return response
 
     def get_connection(
         self,

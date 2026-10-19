@@ -6,6 +6,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class GitHubConnectStartResponse(BaseModel):
+    """Operator-authenticated OAuth start: navigate the browser to authorize_url."""
+
+    authorize_url: str
+
+
 class GitHubConnectionResponse(BaseModel):
     """Safe GitHub connection metadata returned to the frontend."""
 

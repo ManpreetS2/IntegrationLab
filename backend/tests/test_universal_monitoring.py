@@ -51,7 +51,7 @@ def test_instrumented_integration_rejects_github_stripe_and_failure_lab(client) 
     created = create_instrumented(client)
     integration_id = created["id"]
 
-    connect = client.get(f"/api/integrations/{integration_id}/github/connect", follow_redirects=False)
+    connect = client.post(f"/api/integrations/{integration_id}/github/connect")
     assert connect.status_code == 400
     assert connect.json()["detail"] == "Integration provider must be github"
 

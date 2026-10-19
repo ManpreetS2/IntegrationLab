@@ -12,8 +12,16 @@ from app.db.models.telemetry import IngestionCredentialORM
 
 
 class IngestionCredentialRepository:
-    def get(self, session: Session, credential_id: UUID) -> IngestionCredentialORM | None:
-        return session.get(IngestionCredentialORM, credential_id)
+    def get(
+        self,
+        session: Session,
+        credential_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> IngestionCredentialORM | None:
+        if not for_update:
+            return session.get(IngestionCredentialORM, credential_id)
+        return session.get(IngestionCredentialORM, credential_id, with_for_update=True)
 
     def get_by_prefix(self, session: Session, key_prefix: str) -> IngestionCredentialORM | None:
         statement = select(IngestionCredentialORM).where(

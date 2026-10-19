@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
+import time
+import warnings
 from uuid import uuid4
 
 import pytest
@@ -252,6 +254,194 @@ def test_sanitize_route_drops_query_and_identifiers() -> None:
     assert "pw" not in route
 
 
+def test_honors_retry_after_seconds_without_consuming_retry_budget() -> None:
+    state = {"n": 0}
+    sleeps: list[float] = []
+
+    def rate_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        if state["n"] == 1:
+            return 429, b'{"detail":"slow down"}', {"Retry-After": "2"}
+        return 200, b'{"accepted":1,"duplicates":0}', {}
+
+    transport = Transport(rate_limited)
+    with _client(transport, sleep=sleeps.append) as lab:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        result = lab.flush(timeout=2)
+    assert result.delivered
+    assert state["n"] == 2
+    assert sleeps == [2.0]
+    assert lab.stats.accepted == 1
+    assert lab.stats.dropped == 0
+    assert lab.stats.rate_limited == 1
+    assert lab.stats.delivery_failures == 0
+
+
+def test_honors_retry_after_http_date_and_caps_wait() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from integrationlab.client import MAX_RETRY_AFTER_SECONDS, parse_retry_after
+
+    future = datetime.now(timezone.utc) + timedelta(seconds=500)
+    assert parse_retry_after("2") == 2.0
+    assert parse_retry_after(future.strftime("%a, %d %b %Y %H:%M:%S GMT")) >= 400
+
+    state = {"n": 0}
+    sleeps: list[float] = []
+
+    def rate_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        if state["n"] == 1:
+            return (
+                429,
+                b"",
+                {"Retry-After": future.strftime("%a, %d %b %Y %H:%M:%S GMT")},
+            )
+        return 200, b'{"accepted":1,"duplicates":0}', {}
+
+    transport = Transport(rate_limited)
+    with _client(transport, sleep=sleeps.append) as lab:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        lab.flush(timeout=2)
+    assert state["n"] == 2
+    assert sleeps == [MAX_RETRY_AFTER_SECONDS]
+    assert lab.stats.rate_limited == 1
+    assert lab.stats.accepted == 1
+
+
+def test_parse_retry_after_rejects_junk_and_oversized_digits() -> None:
+    from integrationlab.client import parse_retry_after
+
+    assert parse_retry_after("2") == 2.0
+    assert parse_retry_after("0") == 0.0
+    assert parse_retry_after("²") is None
+    assert parse_retry_after("1.5") is None
+    assert parse_retry_after("-5") is None
+    assert parse_retry_after("abc 2") is None
+    assert parse_retry_after("1" * 11) is None
+    assert parse_retry_after("1" * 400) is None
+    assert parse_retry_after("not-a-date") is None
+
+
+def test_repeated_retry_after_eventually_drops_batch() -> None:
+    from integrationlab.client import MAX_RATE_LIMITED_ATTEMPTS, MIN_RETRY_AFTER_SECONDS
+
+    state = {"n": 0}
+    sleeps: list[float] = []
+
+    def always_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        return 429, b"", {"Retry-After": "0"}
+
+    transport = Transport(always_limited)
+    with _client(transport, sleep=sleeps.append) as lab:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        result = lab.flush(timeout=2)
+    assert state["n"] == MAX_RATE_LIMITED_ATTEMPTS
+    assert len(sleeps) == MAX_RATE_LIMITED_ATTEMPTS - 1
+    assert all(s == MIN_RETRY_AFTER_SECONDS for s in sleeps)
+    assert lab.stats.dropped == 1
+    assert lab.stats.accepted == 0
+    assert lab.stats.rate_limited == MAX_RATE_LIMITED_ATTEMPTS
+    assert lab.stats.delivery_failures == 1
+    assert result.last_error == "http_429"
+
+
+def test_close_stops_rate_limited_retry_loop() -> None:
+    release = threading.Event()
+    state = {"n": 0}
+
+    def slow_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        return 429, b"", {"Retry-After": "60"}
+
+    def blocking_sleep(seconds: float) -> None:
+        release.wait(timeout=2)
+
+    transport = Transport(slow_limited)
+    lab = _client(transport, sleep=blocking_sleep)
+    try:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        # Let the worker enter the Retry-After wait.
+        deadline = time.time() + 2
+        while state["n"] < 1 and time.time() < deadline:
+            time.sleep(0.01)
+        assert state["n"] >= 1
+        lab.close(flush_timeout=1)
+        # After close, further POSTs must not continue indefinitely.
+        calls_at_close = state["n"]
+        time.sleep(0.05)
+        release.set()
+        time.sleep(0.05)
+        assert state["n"] <= calls_at_close + 1
+        assert lab.stats.dropped >= 1
+    finally:
+        release.set()
+        lab.close(flush_timeout=1)
+
+
+def test_429_without_retry_after_keeps_exponential_backoff() -> None:
+    state = {"n": 0}
+    sleeps: list[float] = []
+
+    def rate_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        if state["n"] < 3:
+            return 429, b"", {}
+        return 200, b'{"accepted":1,"duplicates":0}', {}
+
+    transport = Transport(rate_limited)
+    lab = IntegrationLabClient(
+        base_url="http://127.0.0.1:8010",
+        integration_id=INTEGRATION_ID,
+        credential=CREDENTIAL,
+        timeout_seconds=0.2,
+        max_retries=3,
+        retry_backoff_seconds=0.2,
+        transport=transport,
+        sleep=sleeps.append,
+    )
+    try:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        lab.flush(timeout=2)
+    finally:
+        lab.close(flush_timeout=2)
+    assert state["n"] == 3
+    assert sleeps == [0.2, 0.4]
+    assert lab.stats.accepted == 1
+    assert lab.stats.rate_limited == 0
+
+
 def test_config_rejects_operator_key_and_loads_env() -> None:
     with pytest.raises(IntegrationLabConfigError):
         IntegrationLabClient(
@@ -275,3 +465,126 @@ def test_config_rejects_operator_key_and_loads_env() -> None:
         )
         lab.flush(timeout=2)
     assert transport.calls
+
+
+def test_close_flushes_multi_batch_queue() -> None:
+    batch_sizes: list[int] = []
+
+    def accept_all(_url, body, _headers, _timeout):
+        n = len(json.loads(body.decode("utf-8"))["events"])
+        batch_sizes.append(n)
+        return 200, json.dumps({"accepted": n, "duplicates": 0, "results": []}).encode(), {}
+
+    transport = Transport(accept_all)
+    lab = IntegrationLabClient(
+        base_url="http://127.0.0.1:8010",
+        integration_id=INTEGRATION_ID,
+        credential=CREDENTIAL,
+        batch_size=10,
+        timeout_seconds=0.2,
+        max_retries=3,
+        retry_backoff_seconds=0,
+        transport=transport,
+    )
+    try:
+        for _ in range(25):
+            assert lab.record_http(
+                service="orders-api",
+                method="GET",
+                route_template="/health",
+                status_code=200,
+                duration_ms=1,
+            )
+        result = lab.close(flush_timeout=5)
+        assert result.accepted == 25
+        assert result.dropped == 0
+        assert lab.stats.dropped == 0
+        assert result.delivered is True
+        assert batch_sizes == [10, 10, 5]
+    finally:
+        lab.close(flush_timeout=1)
+
+
+def test_context_manager_delivers_queued_event() -> None:
+    transport = Transport(_ok)
+    with IntegrationLabClient(
+        base_url="http://127.0.0.1:8010",
+        integration_id=INTEGRATION_ID,
+        credential=CREDENTIAL,
+        timeout_seconds=0.2,
+        max_retries=3,
+        retry_backoff_seconds=0,
+        transport=transport,
+    ) as lab:
+        assert lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+    assert transport.calls
+    assert lab.stats.accepted == 1
+    assert lab.stats.dropped == 0
+
+
+def test_close_during_retry_after_returns_promptly() -> None:
+    state = {"n": 0}
+
+    def always_limited(_url, _body, _headers, _timeout):
+        state["n"] += 1
+        return 429, b"", {"Retry-After": "60"}
+
+    transport = Transport(always_limited)
+    lab = _client(transport)
+    try:
+        lab.record_http(
+            service="orders-api",
+            method="GET",
+            route_template="/health",
+            status_code=200,
+            duration_ms=1,
+        )
+        deadline = time.time() + 2
+        while state["n"] < 1 and time.time() < deadline:
+            time.sleep(0.01)
+        assert state["n"] >= 1
+        started = time.monotonic()
+        lab.close(flush_timeout=2)
+        elapsed = time.monotonic() - started
+        assert elapsed < 2.0
+        assert lab.stats.dropped >= 1
+    finally:
+        lab.close(flush_timeout=1)
+
+
+def test_plain_http_remote_emits_one_warning() -> None:
+    transport = Transport(_ok)
+    with pytest.warns(UserWarning, match="plain HTTP"):
+        with IntegrationLabClient(
+            base_url="http://telemetry.example.com",
+            integration_id=INTEGRATION_ID,
+            credential=CREDENTIAL,
+            transport=transport,
+        ):
+            pass
+
+
+def test_https_and_loopback_http_do_not_warn() -> None:
+    transport = Transport(_ok)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", category=UserWarning)
+        with IntegrationLabClient(
+            base_url="https://telemetry.example.com",
+            integration_id=INTEGRATION_ID,
+            credential=CREDENTIAL,
+            transport=transport,
+        ):
+            pass
+        with IntegrationLabClient(
+            base_url="http://localhost:8010",
+            integration_id=INTEGRATION_ID,
+            credential=CREDENTIAL,
+            transport=transport,
+        ):
+            pass

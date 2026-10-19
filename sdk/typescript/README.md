@@ -29,6 +29,8 @@ export INTEGRATIONLAB_ENVIRONMENT=local
 
 The credential is the ingestion credential IntegrationLab shows once. It is not the operator API key.
 
+Plain `http://` endpoints are allowed; the client logs one `console.warn` per instance when the host is not loopback (`localhost`, `127.x.x.x`, `::1`). Prefer HTTPS in production.
+
 ## Use
 
 ```typescript
@@ -50,4 +52,4 @@ await lab.close();
 
 `recordHttp` queues an observation when you already have the status or a transport error. Invalid events are counted on `lab.stats.rejected` and are not thrown.
 
-Delivery uses a bounded queue, a 2 second timeout, and three attempts for transport failures, HTTP 429, and HTTP 5xx. HTTP 401, 403, and 422 are not retried. A full queue or an exhausted delivery drops the event and increments `lab.stats`. Call `close()` during process shutdown.
+Delivery uses a bounded queue, a 2 second timeout, and three attempts with exponential backoff for transport failures and retryable HTTP errors (including 429/503 without `Retry-After`). When the server returns HTTP 429 or 503 with a `Retry-After` header (delta-seconds or IMF-fixdate), the SDK waits that long (floored at 50ms, capped at 120s) without spending the normal retry budget — at most 5 such waits per batch, then the batch is dropped (`lab.stats.rateLimited`). `close()` aborts an in-flight wait (timers are `unref`'d so Node can exit). HTTP 401, 403, and 422 are not retried. A full queue or an exhausted delivery drops the event and increments `lab.stats`.

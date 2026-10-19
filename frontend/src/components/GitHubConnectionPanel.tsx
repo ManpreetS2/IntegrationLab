@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   checkGitHubConnection,
   getGitHubConnection,
-  githubConnectUrl,
+  startGitHubConnect,
 } from '../api'
 import type { GitHubConnection, Integration } from '../types'
 
@@ -15,6 +15,7 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
   const [profile, setProfile] = useState<GitHubConnection | null>(null)
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(false)
+  const [connecting, setConnecting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,6 +49,18 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
     }
   }, [integration.id, showProfile])
 
+  async function handleConnect() {
+    setConnecting(true)
+    setError(null)
+    try {
+      const { authorize_url } = await startGitHubConnect(integration.id)
+      window.location.assign(authorize_url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start GitHub connect.')
+      setConnecting(false)
+    }
+  }
+
   async function handleCheck() {
     setChecking(true)
     setMessage(null)
@@ -78,9 +91,10 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
     return (
       <div>
         <p className="lg-note">Not connected to GitHub yet. Tokens never reach the browser.</p>
-        <a className="button-link" href={githubConnectUrl(integration.id)}>
-          Connect GitHub
-        </a>
+        <button type="button" className="button-link" onClick={() => void handleConnect()} disabled={connecting}>
+          {connecting ? 'Starting…' : 'Connect GitHub'}
+        </button>
+        {error ? <p className="error-text">{error}</p> : null}
       </div>
     )
   }
@@ -90,9 +104,9 @@ function GitHubConnectionPanel({ integration, onStatusChange }: GitHubConnection
       <div>
         <p className="error-text">Needs setup. GitHub authorization is missing or revoked.</p>
         <div className="github-actions">
-          <a className="button-link" href={githubConnectUrl(integration.id)}>
-            Reconnect GitHub
-          </a>
+          <button type="button" className="button-link" onClick={() => void handleConnect()} disabled={connecting}>
+            {connecting ? 'Starting…' : 'Reconnect GitHub'}
+          </button>
           <button type="button" className="secondary-button" onClick={() => void handleCheck()} disabled={checking}>
             {checking ? 'Checking…' : 'Check connection'}
           </button>

@@ -102,31 +102,35 @@ the authorized GitHub user and prove a real provider connection.
 
 | Step | Method + path |
 |------|----------------|
-| Start connect | `GET /api/integrations/{id}/github/connect` |
+| Start connect | `POST /api/integrations/{id}/github/connect` (operator-authenticated; returns `{authorize_url}`) |
 | Callback | `GET /api/oauth/github/callback` |
 | Profile | `GET /api/integrations/{id}/github` |
 | Check | `POST /api/integrations/{id}/github/check` |
 | Request logs | `GET /api/provider-requests` |
 
-Connect is a **browser navigation** (302 → GitHub). Do not `fetch()` it expecting JSON.
+Console path: authenticated `POST` with `credentials: 'include'`, then navigate
+to `authorize_url`. The response sets a per-state HttpOnly browser-nonce cookie
+required by the callback (parallel tabs do not clobber each other). There is no
+GET connect route. Do not treat connect as a public UUID-only URL.
 
 ## Flow (plain English)
 
-1. Dashboard **Connect GitHub** sends the browser to the backend start URL.
-2. Backend creates an OAuth session (`state` hash + encrypted PKCE verifier) and redirects to GitHub.
-3. User approves on GitHub.
+1. Dashboard **Connect GitHub** POSTs to the backend start URL with the operator key.
+2. Backend creates an OAuth session (`state` hash + encrypted PKCE verifier + browser-nonce hash), sets the HttpOnly nonce cookie, and returns `{authorize_url}`.
+3. The console navigates to GitHub; user approves.
 4. GitHub redirects to the backend callback with `code` + `state`.
-5. Backend validates state (exists, unused, unexpired), decrypts the verifier, exchanges the code for an access token.
-6. Backend calls `GET https://api.github.com/user` with the token.
-7. Backend stores the **encrypted** token, safe profile metadata, marks the integration `connected`, and redirects to the frontend with `/?oauth=github&status=connected`.
-8. React never sees the access token.
+5. Backend validates state (exists, unused, unexpired) **and** the browser-nonce cookie, then **atomically claims** the session (`UPDATE ... SET used_at = now() WHERE used_at IS NULL`) and commits before any outbound GitHub call. A failed token exchange or `/user` call therefore requires **Connect GitHub** again — the state cannot be reused.
+6. Backend decrypts the verifier and exchanges the code for an access token.
+7. Backend calls `GET https://api.github.com/user` with the token.
+8. Backend stores the **encrypted** token, safe profile metadata, marks the integration `connected`, and redirects to the frontend with `/?oauth=github&status=connected`.
+9. React never sees the access token.
 
 Cancel / error callbacks (`?error=access_denied&state=...`) go through the same
-state validation. The request is only treated as our flow when `state` is
-present, known, for GitHub, unused, and unexpired. In that case the state is
-marked used and the browser is redirected to
-`/?oauth=github&status=cancelled` (or `status=error` for other errors).
-Missing, unknown, expired, or reused state returns HTTP 400.
+state + browser-nonce validation and atomic claim. The request is only treated
+as our flow when `state` is present, known, for GitHub, unused, unexpired, and
+the nonce cookie matches. In that case the state is claimed and the browser is
+redirected to `/?oauth=github&status=cancelled` (or `status=error` for other
+errors). Missing, unknown, expired, reused, or unbound state returns HTTP 400.
 `error_description` is never reflected back.
 
 ## Security checklist
@@ -137,7 +141,7 @@ Missing, unknown, expired, or reused state returns HTTP 400.
 | Access token encrypted at rest | Fernet via `TOKEN_ENCRYPTION_KEY` |
 | `state` prevents OAuth CSRF | Random state, hashed in DB, bound to integration |
 | PKCE protects code exchange | S256 challenge; original verifier sent on exchange |
-| Single-use / expiry | ~10 minute TTL; `used_at` set on success and on valid cancel |
+| Single-use / expiry | ~10 minute TTL; `used_at` claimed atomically after nonce check (before token exchange) so concurrent callbacks cannot share a state |
 | Tokens never in React | Not in JSON, redirects, or localStorage |
 | Minimal scope | `read:user` only |
 | `.env` ignored | Secrets stay local |

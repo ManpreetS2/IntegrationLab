@@ -7,9 +7,11 @@ Public-by-design routes:
 - /health and /ready (outside /api)
 - /auth/operator (reports whether the gate is enabled)
 - Stripe webhook receipt routes (outside /api)
-- GitHub OAuth callback
-- GitHub OAuth connect redirect (requires an unguessable integration UUID and
-  only starts the provider flow; the rest of the operator surface stays gated)
+- GitHub OAuth callback (completion still requires the start-time browser nonce)
+
+GitHub OAuth connect is operator-gated. The console POSTs with the bearer key,
+receives `{authorize_url}`, and navigates there after an HttpOnly nonce cookie
+is set. Knowing an integration UUID alone cannot replace a stored connection.
 
 POST /api/telemetry/v1/events is not operator-authenticated. It requires an
 ingestion credential, checked by the route. An ingestion credential (prefix
@@ -18,7 +20,6 @@ ilk_v1_) is rejected on every other /api route.
 
 from __future__ import annotations
 
-import re
 import secrets
 
 from starlette.responses import JSONResponse
@@ -26,11 +27,6 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
 
-_GITHUB_CONNECT_RE = re.compile(
-    r"^/api/integrations/"
-    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/github/connect$"
-)
 _PUBLIC_API_GET_PATHS = {"/api/oauth/github/callback"}
 _TELEMETRY_INGEST_PATH = "/api/telemetry/v1/events"
 _INGESTION_CREDENTIAL_PREFIX = "ilk_v1_"
@@ -45,7 +41,7 @@ def is_public_api_request(path: str, method: str) -> bool:
     """Return True only for the small /api surface that must be browser-public."""
     if method.upper() != "GET":
         return False
-    return path in _PUBLIC_API_GET_PATHS or bool(_GITHUB_CONNECT_RE.fullmatch(path))
+    return path in _PUBLIC_API_GET_PATHS
 
 
 def _authorization_header(scope: Scope) -> str | None:

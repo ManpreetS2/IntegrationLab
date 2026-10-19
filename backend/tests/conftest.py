@@ -36,7 +36,10 @@ os.environ["GITHUB_OAUTH_REDIRECT_URI"] = (
 )
 os.environ["FRONTEND_URL"] = "http://localhost:5173"
 # Operator auth is covered by dedicated tests; default suite stays open.
-os.environ.pop("OPERATOR_API_KEY", None)
+# Set empty (do not pop): an empty env value overrides a developer .env key
+# (including backend/.env), whereas unsetting would let pydantic reload
+# OPERATOR_API_KEY from env_file and gate the suite.
+os.environ["OPERATOR_API_KEY"] = ""
 # Obviously fake webhook secret; tests sign payloads with it locally.
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_example")
 

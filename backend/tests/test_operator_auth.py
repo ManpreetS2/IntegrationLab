@@ -22,7 +22,7 @@ def test_operator_authorized_uses_configured_key() -> None:
     assert operator_authorized("correct-key", None) is False
 
 
-def test_only_oauth_browser_handoff_routes_are_public_under_api() -> None:
+def test_only_oauth_callback_is_public_under_api() -> None:
     integration_id = "8a8c4b3a-862a-4ddf-81f0-42d1861fdd9b"
 
     assert is_public_api_request("/api/oauth/github/callback", "GET") is True
@@ -31,7 +31,14 @@ def test_only_oauth_browser_handoff_routes_are_public_under_api() -> None:
             f"/api/integrations/{integration_id}/github/connect",
             "GET",
         )
-        is True
+        is False
+    )
+    assert (
+        is_public_api_request(
+            f"/api/integrations/{integration_id}/github/connect",
+            "POST",
+        )
+        is False
     )
 
     assert is_public_api_request("/api/integrations", "GET") is False

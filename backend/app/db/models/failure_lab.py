@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +14,9 @@ class FailureLabRunORM(Base):
     """Persisted Failure Lab experiment (simulated evidence + diagnosis)."""
 
     __tablename__ = "failure_lab_runs"
+    __table_args__ = (
+        Index("ix_failure_lab_runs_correlation_id", "correlation_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     integration_id: Mapped[UUID] = mapped_column(

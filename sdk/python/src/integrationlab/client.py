@@ -8,8 +8,11 @@ request and is omitted from ``repr``.
 from __future__ import annotations
 
 import atexit
+import ipaddress
 import json
 import os
+import re
+import warnings
 import threading
 import time
 import urllib.error
@@ -19,6 +22,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
@@ -28,8 +32,44 @@ SDK_VERSION = "0.1.0"
 _ENVIRONMENTS = {"local", "test", "staging", "production"}
 _METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 _DROP_STATUSES = {400, 401, 403, 413, 422}
+_RETRY_AFTER_STATUSES = {429, 503}
+MAX_RETRY_AFTER_SECONDS = 120.0
+# Floor when Retry-After is 0 / a past HTTP-date — avoids a busy spin.
+MIN_RETRY_AFTER_SECONDS = 0.05
+# Separate budget so Retry-After waits cannot loop forever.
+MAX_RATE_LIMITED_ATTEMPTS = 5
+_RETRY_AFTER_SECONDS_RE = re.compile(r"^[0-9]{1,10}$")
+# IMF-fixdate (RFC 7231), e.g. Sun, 06 Nov 1994 08:49:37 GMT
+_IMF_FIXDATE_RE = re.compile(
+    r"^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$"
+)
 
-Transport = Callable[[str, bytes, dict[str, str], float], tuple[int, bytes]]
+# (status_code, body, response_headers)
+Transport = Callable[[str, bytes, dict[str, str], float], tuple[int, bytes, Mapping[str, str]]]
+
+_PLAIN_HTTP_WARNING = (
+    "IntegrationLab base_url uses plain HTTP to a non-loopback host; "
+    "prefer HTTPS in production."
+)
+
+
+def _is_loopback_host(hostname: str) -> bool:
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _warn_plain_http_base_url(base_url: str) -> None:
+    parsed = urlparse(base_url.strip())
+    if parsed.scheme != "http":
+        return
+    host = parsed.hostname
+    if not host or _is_loopback_host(host):
+        return
+    warnings.warn(_PLAIN_HTTP_WARNING, UserWarning, stacklevel=3)
 
 
 class IntegrationLabConfigError(ValueError):
@@ -44,6 +84,7 @@ class ClientStats:
     accepted: int = 0
     duplicates: int = 0
     delivery_failures: int = 0
+    rate_limited: int = 0
 
 
 @dataclass
@@ -72,6 +113,7 @@ class IntegrationLabClient:
         max_retries: int = 3,
         retry_backoff_seconds: float = 0.2,
         transport: Transport | None = None,
+        sleep: Callable[[float], None] | None = None,
     ) -> None:
         parsed = urlparse(base_url.strip())
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -90,6 +132,7 @@ class IntegrationLabClient:
         if timeout_seconds <= 0 or max_queue < 1 or batch_size < 1 or max_retries < 1:
             raise IntegrationLabConfigError("timeout, queue, batch size, and retries must be positive")
 
+        _warn_plain_http_base_url(base_url)
         self._base_url = base_url.rstrip("/")
         self._integration_id = str(integration_id)
         self._credential = credential
@@ -100,10 +143,13 @@ class IntegrationLabClient:
         self._max_retries = max_retries
         self._backoff = max(0.0, retry_backoff_seconds)
         self._transport = transport or _urllib_transport
+        self._custom_sleep = sleep is not None
+        self._sleep = sleep or time.sleep
         self.stats = ClientStats()
         self._last_error: str | None = None
         self._buffer: list[dict[str, Any]] = []
         self._inflight = False
+        self._closing = False
         self._stop = False
         self._closed = False
         self._cv = threading.Condition()
@@ -183,7 +229,7 @@ class IntegrationLabClient:
             if event is None:
                 self.stats.rejected += 1
                 return False
-            if self._closed or len(self._buffer) >= self._max_queue:
+            if self._closing or self._closed or len(self._buffer) >= self._max_queue:
                 self.stats.dropped += 1
                 return False
             self._buffer.append(event)
@@ -247,9 +293,14 @@ class IntegrationLabClient:
             )
 
     def close(self, *, flush_timeout: float = 5.0) -> FlushResult:
-        """Flush, stop the worker, and return the flush result."""
+        """Reject new records, flush queued batches, then stop the worker."""
         if self._closed and not self._thread.is_alive():
             return self.flush(timeout=0)
+        # Closing wakes in-flight Retry-After/backoff waits (drop that one batch)
+        # but does not stop the worker from delivering not-yet-attempted batches.
+        with self._cv:
+            self._closing = True
+            self._cv.notify_all()
         result = self.flush(timeout=flush_timeout)
         with self._cv:
             self._closed = True
@@ -262,6 +313,25 @@ class IntegrationLabClient:
             pass
         return result
 
+    def _wait_or_stop(self, seconds: float) -> bool:
+        """Wait ``seconds`` (or until closing/stop). Returns True if aborted."""
+        if self._closing or self._stop or self._closed:
+            return True
+        if self._custom_sleep:
+            # Injectable sleeper (tests): record the full wait, then re-check stop.
+            self._sleep(seconds)
+            return bool(self._closing or self._stop or self._closed)
+        if seconds <= 0:
+            return False
+        deadline = time.monotonic() + seconds
+        with self._cv:
+            while not self._closing and not self._stop and not self._closed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._cv.wait(timeout=remaining)
+            return True
+
     def __enter__(self) -> IntegrationLabClient:
         return self
 
@@ -269,7 +339,7 @@ class IntegrationLabClient:
         self.close()
 
     def _shutdown_from_atexit(self) -> None:
-        if not self._closed:
+        if not self._closed and not self._closing:
             self.close(flush_timeout=2.0)
 
     def _run(self) -> None:
@@ -295,45 +365,68 @@ class IntegrationLabClient:
                 self._cv.notify_all()
 
     def _deliver(self, batch: list[dict[str, Any]]) -> None:
-        for attempt in range(self._max_retries):
+        attempt = 0
+        rate_limited_attempts = 0
+        while attempt < self._max_retries:
+            # Fully stopped workers abort; ``_closing`` still allows delivery of
+            # not-yet-attempted batches (in-flight Retry-After aborts via wait).
+            if self._stop or self._closed:
+                break
             try:
-                outcome = self._post(batch)
+                outcome, retry_after = self._post(batch)
             except Exception:
-                outcome = "retry"
+                outcome, retry_after = "retry", None
                 self._last_error = "transport_error"
             if outcome == "ok":
                 return
             if outcome == "drop":
                 self.stats.rejected += len(batch)
                 return
-            if attempt + 1 < self._max_retries and self._backoff:
-                time.sleep(self._backoff * (2**attempt))
+            if outcome == "rate_limited" and retry_after is not None:
+                rate_limited_attempts += 1
+                self.stats.rate_limited += 1
+                if rate_limited_attempts >= MAX_RATE_LIMITED_ATTEMPTS:
+                    break
+                wait = min(max(retry_after, MIN_RETRY_AFTER_SECONDS), MAX_RETRY_AFTER_SECONDS)
+                if self._wait_or_stop(wait):
+                    break
+                continue
+            attempt += 1
+            if attempt < self._max_retries and self._backoff:
+                if self._wait_or_stop(self._backoff * (2 ** (attempt - 1))):
+                    break
         self.stats.dropped += len(batch)
         self.stats.delivery_failures += 1
 
-    def _post(self, batch: list[dict[str, Any]]) -> str:
+    def _post(self, batch: list[dict[str, Any]]) -> tuple[str, float | None]:
         body = json.dumps({"events": batch}).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {self._credential}",
             "Content-Type": "application/json",
             "User-Agent": f"{SDK_NAME}/{SDK_VERSION}",
         }
-        status_code, payload = self._transport(
-            f"{self._base_url}/api/telemetry/v1/events",
-            body,
-            headers,
-            self._timeout,
+        status_code, payload, response_headers = _normalize_transport_result(
+            self._transport(
+                f"{self._base_url}/api/telemetry/v1/events",
+                body,
+                headers,
+                self._timeout,
+            )
         )
         if status_code == 200:
             accepted, duplicates = _ack_counts(payload, len(batch))
             self.stats.accepted += accepted
             self.stats.duplicates += duplicates
             self._last_error = None
-            return "ok"
+            return "ok", None
         self._last_error = f"http_{status_code}"
         if status_code in _DROP_STATUSES:
-            return "drop"
-        return "retry"
+            return "drop", None
+        if status_code in _RETRY_AFTER_STATUSES:
+            retry_after = parse_retry_after(_header_value(response_headers, "Retry-After"))
+            if retry_after is not None:
+                return "rate_limited", retry_after
+        return "retry", None
 
 
 class Observation:
@@ -437,11 +530,57 @@ def _ack_counts(payload: bytes, batch_size: int) -> tuple[int, int]:
         return batch_size, 0
 
 
-def _urllib_transport(url: str, body: bytes, headers: dict[str, str], timeout: float) -> tuple[int, bytes]:
+def parse_retry_after(value: str | None, *, now: datetime | None = None) -> float | None:
+    """Parse Retry-After as delta-seconds (1–10 digits) or IMF-fixdate HTTP-date.
+
+    Returns ``None`` for malformed values (including unicode digits and junk
+    that ``Date.parse`` / ``isdigit`` would otherwise accept). A past HTTP-date
+    yields ``0.0``; callers apply ``MIN_RETRY_AFTER_SECONDS``.
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if _RETRY_AFTER_SECONDS_RE.fullmatch(text):
+        return float(int(text))
+    if not _IMF_FIXDATE_RE.fullmatch(text):
+        return None
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    reference = now or datetime.now(timezone.utc)
+    return max(0.0, (when - reference).total_seconds())
+
+
+def _header_value(headers: Mapping[str, str], name: str) -> str | None:
+    target = name.lower()
+    for key, value in headers.items():
+        if key.lower() == target:
+            return value
+    return None
+
+
+def _normalize_transport_result(
+    result: tuple[int, bytes] | tuple[int, bytes, Mapping[str, str]],
+) -> tuple[int, bytes, Mapping[str, str]]:
+    if len(result) == 2:
+        status_code, payload = result  # type: ignore[misc]
+        return status_code, payload, {}
+    status_code, payload, headers = result  # type: ignore[misc]
+    return status_code, payload, headers
+
+
+def _urllib_transport(
+    url: str, body: bytes, headers: dict[str, str], timeout: float
+) -> tuple[int, bytes, dict[str, str]]:
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, response.read(2048)
+            return response.status, response.read(2048), dict(response.headers.items())
     except urllib.error.HTTPError as exc:
         raw = exc.read(2048)
-        return exc.code, raw
+        return exc.code, raw, dict(exc.headers.items()) if exc.headers is not None else {}

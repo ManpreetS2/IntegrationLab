@@ -14,6 +14,8 @@
 8. Invalidate CloudFront (`/index.html` and `/*`).
 9. Smoke test `/health`, `/ready`, `/api/reliability/system` through CloudFront.
 
+With `APP_ENV=production`, FastAPI hides `/docs`, `/redoc`, and `/openapi.json` unless you set `EXPOSE_API_DOCS=true`.
+
 Scale-to-zero for cost control is manual (`aws ecs update-service --desired-count 0`)
 and is not a successful deploy outcome.
 

@@ -20,7 +20,7 @@ from app.api import (
     support_cases,
     telemetry,
 )
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.operator_auth import OperatorAuthMiddleware
 from app.core.telemetry_body_limit import TelemetryBodyLimitMiddleware
 
@@ -29,38 +29,48 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-settings = get_settings()
 
-app = FastAPI(
-    title="IntegrationLab",
-    description=(
-        "Partner integration reliability console (GitHub OAuth, Failure Lab, Stripe webhooks, "
-        "SDK-reported HTTP telemetry, reliability dashboard, guided diagnostics, support cases)"
-    ),
-    version="0.9.0",
-)
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the FastAPI application (used by tests and the module-level ``app``)."""
+    resolved = settings or get_settings()
+    docs_on = resolved.api_docs_enabled()
+    application = FastAPI(
+        title="IntegrationLab",
+        description=(
+            "Partner integration reliability console (GitHub OAuth, Failure Lab, Stripe webhooks, "
+            "SDK-reported HTTP telemetry, reliability dashboard, guided diagnostics, support cases)"
+        ),
+        version="0.9.0",
+        docs_url="/docs" if docs_on else None,
+        redoc_url="/redoc" if docs_on else None,
+        openapi_url="/openapi.json" if docs_on else None,
+    )
 
-app.add_middleware(TelemetryBodyLimitMiddleware)
-app.add_middleware(OperatorAuthMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    application.add_middleware(TelemetryBodyLimitMiddleware)
+    application.add_middleware(OperatorAuthMiddleware)
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=resolved.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-app.include_router(health.router)
-app.include_router(integrations.router)
-app.include_router(ingestion_credentials.router)
-app.include_router(telemetry.router)
-app.include_router(github.router)
-app.include_router(oauth.router)
-app.include_router(provider_requests.router)
-app.include_router(failure_lab.router)
-app.include_router(stripe_webhooks.public_router)
-app.include_router(stripe_webhooks.router)
-app.include_router(reliability.router)
-app.include_router(diagnostics.router)
-app.include_router(support_cases.router)
-app.include_router(audit.router)
+    application.include_router(health.router)
+    application.include_router(integrations.router)
+    application.include_router(ingestion_credentials.router)
+    application.include_router(telemetry.router)
+    application.include_router(github.router)
+    application.include_router(oauth.router)
+    application.include_router(provider_requests.router)
+    application.include_router(failure_lab.router)
+    application.include_router(stripe_webhooks.public_router)
+    application.include_router(stripe_webhooks.router)
+    application.include_router(reliability.router)
+    application.include_router(diagnostics.router)
+    application.include_router(support_cases.router)
+    application.include_router(audit.router)
+    return application
+
+
+app = create_app()

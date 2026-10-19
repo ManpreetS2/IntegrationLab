@@ -53,11 +53,9 @@ def test_normalize_oauth_error_on_http_200() -> None:
 
 @respx.mock
 def test_exchange_code_http_200_oauth_error_logged(client, db_session, github_integration_id) -> None:
-    start = client.get(
-        f"/api/integrations/{github_integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    start = client.post(f"/api/integrations/{github_integration_id}/github/connect")
+    assert start.status_code == 200
+    state = parse_qs(urlparse(start.json()["authorize_url"]).query)["state"][0]
 
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
@@ -88,11 +86,9 @@ def test_exchange_code_http_200_oauth_error_logged(client, db_session, github_in
 
 @respx.mock
 def test_get_user_malformed_json_classified(client, db_session, github_integration_id) -> None:
-    start = client.get(
-        f"/api/integrations/{github_integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    start = client.post(f"/api/integrations/{github_integration_id}/github/connect")
+    assert start.status_code == 200
+    state = parse_qs(urlparse(start.json()["authorize_url"]).query)["state"][0]
 
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
@@ -127,11 +123,9 @@ def test_get_user_malformed_json_classified(client, db_session, github_integrati
 
 @respx.mock
 def test_granted_scope_can_differ_from_requested(client, github_integration_id) -> None:
-    start = client.get(
-        f"/api/integrations/{github_integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    start = client.post(f"/api/integrations/{github_integration_id}/github/connect")
+    assert start.status_code == 200
+    state = parse_qs(urlparse(start.json()["authorize_url"]).query)["state"][0]
 
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
@@ -165,11 +159,9 @@ def test_granted_scope_can_differ_from_requested(client, github_integration_id) 
 
 
 def test_oauth_cancel_access_denied(client, db_session, github_integration_id) -> None:
-    start = client.get(
-        f"/api/integrations/{github_integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    start = client.post(f"/api/integrations/{github_integration_id}/github/connect")
+    assert start.status_code == 200
+    state = parse_qs(urlparse(start.json()["authorize_url"]).query)["state"][0]
 
     response = client.get(
         "/api/oauth/github/callback",
@@ -251,11 +243,9 @@ def test_oauth_cancel_expired_state_rejected(client, db_session, github_integrat
 
 
 def test_oauth_cancel_reused_state_rejected(client, github_integration_id) -> None:
-    start = client.get(
-        f"/api/integrations/{github_integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    start = client.post(f"/api/integrations/{github_integration_id}/github/connect")
+    assert start.status_code == 200
+    state = parse_qs(urlparse(start.json()["authorize_url"]).query)["state"][0]
 
     first = client.get(
         "/api/oauth/github/callback",

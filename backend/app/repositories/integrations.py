@@ -26,9 +26,25 @@ class IntegrationRepository:
         statement = select(IntegrationORM).order_by(IntegrationORM.created_at.asc())
         return list(session.scalars(statement).all())
 
-    def get_by_id(self, session: Session, integration_id: UUID) -> IntegrationORM | None:
+    def get_by_id(
+        self,
+        session: Session,
+        integration_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> IntegrationORM | None:
         """Fetch one integration by primary key, or None if missing."""
-        return session.get(IntegrationORM, integration_id)
+        if not for_update:
+            return session.get(IntegrationORM, integration_id)
+        # FOR NO KEY UPDATE: serializes create/rotate/revoke with each other
+        # without blocking telemetry ingest, which only needs FOR KEY SHARE on
+        # the integration row when inserting telemetry_events (FK).
+        statement = (
+            select(IntegrationORM)
+            .where(IntegrationORM.id == integration_id)
+            .with_for_update(key_share=True)
+        )
+        return session.scalars(statement).first()
 
     def create(
         self,
