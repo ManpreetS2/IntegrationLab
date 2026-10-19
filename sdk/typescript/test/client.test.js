@@ -8,6 +8,7 @@ import {
   MAX_RATE_LIMITED_ATTEMPTS,
   MAX_RETRY_AFTER_MS,
   MIN_RETRY_AFTER_MS,
+  isValidRouteTemplate,
   parseRetryAfterMs,
   sanitizeRoute,
 } from "../dist/index.js";
@@ -226,6 +227,87 @@ test("sanitizeRoute removes queries and identifiers", () => {
   assert.equal(route, "/v1/orders/{id}");
   assert.equal(route.includes("token"), false);
   assert.equal(route.includes("pw"), false);
+});
+
+test("sanitizeRoute root URL is server-valid", () => {
+  assert.equal(sanitizeRoute("https://api.example.com/"), "/{root}");
+  assert.equal(sanitizeRoute("https://api.example.com"), "/{root}");
+  assert.equal(isValidRouteTemplate("/{root}"), true);
+  assert.equal(isValidRouteTemplate("/"), false);
+});
+
+test("recordHttp rejects invalid route without queueing", async () => {
+  const calls = [];
+  const lab = client(async (url, body) => {
+    calls.push(body);
+    return ok();
+  });
+  assert.equal(
+    lab.recordHttp({
+      service: "orders-api",
+      method: "GET",
+      routeTemplate: "/",
+      statusCode: 200,
+      durationMs: 1,
+    }),
+    false,
+  );
+  assert.equal(
+    lab.recordHttp({
+      service: "orders-api",
+      method: "GET",
+      routeTemplate: "/orders/12345678",
+      statusCode: 200,
+      durationMs: 1,
+    }),
+    false,
+  );
+  assert.equal(lab.stats.rejected, 2);
+  assert.equal(
+    lab.recordHttp({
+      service: "orders-api",
+      method: "GET",
+      routeTemplate: "/v1/orders/{id}",
+      statusCode: 200,
+      durationMs: 1,
+    }),
+    true,
+  );
+  await lab.flush(2000);
+  assert.equal(lab.stats.accepted, 1);
+  assert.equal(lab.stats.dropped, 0);
+  assert.equal(calls.length, 1);
+  await lab.close();
+});
+
+test("instrumentFetch root URL does not poison the batch", async () => {
+  const calls = [];
+  const lab = client(async (url, body) => {
+    calls.push(JSON.parse(body));
+    return {
+      status: 200,
+      body: JSON.stringify({ accepted: JSON.parse(body).events.length, duplicates: 0, results: [] }),
+    };
+  });
+  const wrapped = lab.instrumentFetch(async () => new Response("ok", { status: 200 }), {
+    service: "orders-api",
+  });
+  await wrapped("https://api.example.com/");
+  assert.equal(
+    lab.recordHttp({
+      service: "orders-api",
+      method: "GET",
+      routeTemplate: "/v1/orders/{id}",
+      statusCode: 200,
+      durationMs: 1,
+    }),
+    true,
+  );
+  const result = await lab.close(2000);
+  assert.equal(result.accepted, 2);
+  assert.equal(result.dropped, 0);
+  const routes = calls.flatMap((batch) => batch.events.map((event) => event.route_template));
+  assert.deepEqual(routes.sort(), ["/{root}", "/v1/orders/{id}"].sort());
 });
 
 test("honors Retry-After seconds without consuming the retry budget", async () => {

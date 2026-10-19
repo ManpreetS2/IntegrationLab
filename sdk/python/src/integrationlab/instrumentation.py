@@ -27,7 +27,8 @@ def sanitize_route(url: str) -> str:
                 char for char in segment if char.isalnum() or char in "._~!$&'()*+,;=-{}"
             )
             segments.append(cleaned[:64] or "{id}")
-    route = "/" + "/".join(segments) if segments else "/"
+    # Root URLs have no path segments; "/" is rejected by the server.
+    route = "/" + "/".join(segments) if segments else "/{root}"
     return route[:200]
 
 
