@@ -75,12 +75,13 @@ These are intentionally not protected by the operator bearer gate:
 - `GET /api/oauth/github/callback` (protected by OAuth state/PKCE **and** the
   start-time HttpOnly browser-nonce cookie)
 
-GitHub connect (`POST`/`GET /api/integrations/{uuid}/github/connect`) is
+GitHub connect (`POST /api/integrations/{uuid}/github/connect` only) is
 **not** public. Starting OAuth requires the operator bearer key (when the gate
 is enabled). The console POSTs with that key, receives `{authorize_url}`, and
-navigates after the backend sets an HttpOnly `SameSite=Lax` nonce cookie.
-Knowing an integration UUID alone cannot create a completable OAuth session or
-overwrite a stored GitHub connection.
+navigates after the backend sets a per-state HttpOnly `SameSite=Lax` nonce
+cookie. There is no GET connect route (browser navigation cannot send the
+Bearer token). Knowing an integration UUID alone cannot create a completable
+OAuth session or overwrite a stored GitHub connection.
 
 ## Residual risks / deliberate portfolio tradeoffs
 

@@ -11,11 +11,9 @@ from app.services.github_client import GITHUB_TOKEN_URL
 
 
 def _connect_github(client, integration_id: str) -> None:
-    start = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    start = client.post(f"/api/integrations/{integration_id}/github/connect")
+    assert start.status_code == 200
+    state = parse_qs(urlparse(start.json()["authorize_url"]).query)["state"][0]
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
             200,

@@ -61,6 +61,7 @@ def test_oauth_callback_stays_public_under_gate(gated_client: TestClient) -> Non
 
 def test_github_connect_requires_operator_key_under_gate(gated_client: TestClient) -> None:
     integration_id = "8a8c4b3a-862a-4ddf-81f0-42d1861fdd9b"
+    # GET is no longer a route; the operator gate still rejects unauthenticated /api.
     get_response = gated_client.get(
         f"/api/integrations/{integration_id}/github/connect",
         follow_redirects=False,

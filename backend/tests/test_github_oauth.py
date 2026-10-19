@@ -12,7 +12,18 @@ from app.core.security import TokenCipher, generate_oauth_state, hash_oauth_stat
 from app.db.models.oauth import OAuthCredentialORM, OAuthSessionORM
 from app.repositories.oauth import oauth_session_repository
 from app.services.github_client import GITHUB_TOKEN_URL
+from app.services.github_oauth import browser_nonce_cookie_name
 
+
+def _start_connect(client, integration_id: str) -> str:
+    """POST connect; return authorize_url (TestClient stores the nonce cookie)."""
+    response = client.post(f"/api/integrations/{integration_id}/github/connect")
+    assert response.status_code == 200, response.text
+    return response.json()["authorize_url"]
+
+
+def _state_from_authorize_url(authorize_url: str) -> str:
+    return parse_qs(urlparse(authorize_url).query)["state"][0]
 
 def _github_seed_id(client) -> str:
     items = client.get("/api/integrations").json()
@@ -23,14 +34,8 @@ def _github_seed_id(client) -> str:
 def test_connect_redirects_with_pkce_and_state(client, db_session) -> None:
     integration_id = _github_seed_id(client)
 
-    response = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 302
-    location = response.headers["location"]
-    parsed = urlparse(location)
+    authorize_url = _start_connect(client, integration_id)
+    parsed = urlparse(authorize_url)
     assert parsed.netloc == "github.com"
     assert parsed.path == "/login/oauth/authorize"
 
@@ -53,17 +58,13 @@ def test_connect_rejects_non_github_provider(client) -> None:
     stripe = next(
         item for item in client.get("/api/integrations").json() if item["provider"] == "stripe"
     )
-    response = client.get(
-        f"/api/integrations/{stripe['id']}/github/connect",
-        follow_redirects=False,
-    )
+    response = client.post(f"/api/integrations/{stripe['id']}/github/connect")
     assert response.status_code == 400
 
 
 def test_connect_404_for_unknown_integration(client) -> None:
-    response = client.get(
+    response = client.post(
         "/api/integrations/00000000-0000-0000-0000-000000000099/github/connect",
-        follow_redirects=False,
     )
     assert response.status_code == 404
 
@@ -71,11 +72,8 @@ def test_connect_404_for_unknown_integration(client) -> None:
 @respx.mock
 def test_callback_success_persists_encrypted_token_and_profile(client, db_session) -> None:
     integration_id = _github_seed_id(client)
-    start = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    authorize_url = _start_connect(client, integration_id)
+    state = _state_from_authorize_url(authorize_url)
 
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
@@ -133,11 +131,8 @@ def test_callback_success_persists_encrypted_token_and_profile(client, db_sessio
 @respx.mock
 def test_callback_rejects_reused_state(client) -> None:
     integration_id = _github_seed_id(client)
-    start = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    authorize_url = _start_connect(client, integration_id)
+    state = _state_from_authorize_url(authorize_url)
 
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
@@ -206,11 +201,8 @@ def test_callback_rejects_expired_state(client, db_session, github_integration_i
 @respx.mock
 def test_callback_token_exchange_failure(client) -> None:
     integration_id = _github_seed_id(client)
-    start = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    authorize_url = _start_connect(client, integration_id)
+    state = _state_from_authorize_url(authorize_url)
 
     respx.post(GITHUB_TOKEN_URL).mock(return_value=Response(500, json={"error": "server"}))
 
@@ -226,11 +218,8 @@ def test_callback_token_exchange_failure(client) -> None:
 @respx.mock
 def test_callback_user_fetch_failure(client) -> None:
     integration_id = _github_seed_id(client)
-    start = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    authorize_url = _start_connect(client, integration_id)
+    state = _state_from_authorize_url(authorize_url)
 
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
@@ -259,10 +248,7 @@ def test_connect_missing_oauth_config(client, monkeypatch) -> None:
 
     monkeypatch.setattr(oauth_module.github_oauth_service.settings, "github_client_id", None)
     integration_id = _github_seed_id(client)
-    response = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
+    response = client.post(f"/api/integrations/{integration_id}/github/connect")
     assert response.status_code == 503
 
 
@@ -275,7 +261,8 @@ def test_connect_post_returns_authorize_url_and_sets_nonce_cookie(client, db_ses
     assert "authorize_url" in body
     parsed = urlparse(body["authorize_url"])
     assert parsed.netloc == "github.com"
-    assert "il_github_oauth_nonce" in response.cookies
+    state = _state_from_authorize_url(body["authorize_url"])
+    assert browser_nonce_cookie_name(state) in response.cookies
 
     sessions = list(db_session.scalars(select(OAuthSessionORM)).all())
     assert len(sessions) == 1
@@ -290,11 +277,8 @@ def test_callback_without_browser_nonce_rejects_and_leaves_connection_unchanged(
     integration_id = _github_seed_id(client)
 
     # Establish a real connected baseline through the bound operator path.
-    start = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    authorize_url = _start_connect(client, integration_id)
+    state = _state_from_authorize_url(authorize_url)
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
             200,
@@ -374,15 +358,12 @@ def test_callback_without_browser_nonce_rejects_and_leaves_connection_unchanged(
 @respx.mock
 def test_callback_rejects_wrong_browser_nonce(client, db_session) -> None:
     integration_id = _github_seed_id(client)
-    start = client.get(
-        f"/api/integrations/{integration_id}/github/connect",
-        follow_redirects=False,
-    )
-    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    authorize_url = _start_connect(client, integration_id)
+    state = _state_from_authorize_url(authorize_url)
 
     # Drop the legitimate cookie and plant a forged one.
     client.cookies.clear()
-    client.cookies.set("il_github_oauth_nonce", "forged-nonce", path="/api/oauth/github")
+    client.cookies.set(browser_nonce_cookie_name(state), "forged-nonce", path="/api/oauth/github")
 
     respx.post(GITHUB_TOKEN_URL).mock(
         return_value=Response(
@@ -404,3 +385,58 @@ def test_callback_rejects_wrong_browser_nonce(client, db_session) -> None:
     )
     assert response.status_code == 400
     assert list(db_session.scalars(select(OAuthCredentialORM)).all()) == []
+
+
+def test_get_connect_route_is_removed(client) -> None:
+    integration_id = _github_seed_id(client)
+    response = client.get(
+        f"/api/integrations/{integration_id}/github/connect",
+        follow_redirects=False,
+    )
+    # Middleware may 401 when gated; with gate off FastAPI returns 405.
+    assert response.status_code in {404, 405}
+
+
+@respx.mock
+def test_parallel_connects_keep_separate_nonce_cookies(client, db_session) -> None:
+    """A second tab's connect must not invalidate the first tab's callback."""
+    integration_id = _github_seed_id(client)
+    first_url = _start_connect(client, integration_id)
+    first_state = _state_from_authorize_url(first_url)
+    first_cookie = browser_nonce_cookie_name(first_state)
+    first_nonce = client.cookies.get(first_cookie)
+    assert first_nonce
+
+    second_url = _start_connect(client, integration_id)
+    second_state = _state_from_authorize_url(second_url)
+    second_cookie = browser_nonce_cookie_name(second_state)
+    assert first_cookie != second_cookie
+    assert client.cookies.get(first_cookie) == first_nonce
+    assert client.cookies.get(second_cookie)
+
+    respx.post(GITHUB_TOKEN_URL).mock(
+        return_value=Response(
+            200,
+            json={"access_token": "gho_first_tab", "scope": "read:user"},
+        )
+    )
+    respx.get("https://api.github.com/user").mock(
+        return_value=Response(
+            200,
+            json={
+                "id": 7,
+                "login": "first-tab",
+                "avatar_url": None,
+                "html_url": None,
+                "public_repos": 1,
+            },
+        )
+    )
+    callback = client.get(
+        "/api/oauth/github/callback",
+        params={"code": "first-code", "state": first_state},
+        follow_redirects=False,
+    )
+    assert callback.status_code == 302
+    profile = client.get(f"/api/integrations/{integration_id}/github").json()
+    assert profile["login"] == "first-tab"

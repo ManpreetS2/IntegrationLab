@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import JSONResponse
 
 from app.core.correlation import correlation_scope, parse_correlation_id, short_entity_id
 from app.core.database import get_db
@@ -64,31 +64,16 @@ def connect_github_start(
 ) -> JSONResponse:
     """Start GitHub OAuth for the authenticated operator.
 
-    Creates the OAuth session, sets an HttpOnly browser-nonce cookie, and
-    returns ``{authorize_url}`` for the console to navigate to. Not a public
-    route — the operator bearer gate applies when configured.
+    Creates the OAuth session, sets a per-state HttpOnly browser-nonce cookie,
+    and returns ``{authorize_url}`` for the console to navigate to. Not a
+    public route — the operator bearer gate applies when configured.
+
+    There is no GET variant: browser navigation cannot send the operator
+    Bearer token, so the console must POST then navigate.
     """
     with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
         _audit_connect_requested(db, integration_id=integration_id, correlation_id=correlation_id)
         return github_oauth_service.start_connect_json(db, integration_id)
-
-
-@router.get("/{integration_id}/github/connect")
-def connect_github(
-    integration_id: UUID,
-    db: Session = Depends(get_db),
-    x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
-) -> RedirectResponse:
-    """Start GitHub OAuth via browser redirect (operator-authenticated when gated).
-
-    Prefer POST + authorize_url navigation from the console so the operator
-    key can be sent as a Bearer header. This GET remains for same-origin
-    handoffs that already carry operator auth via middleware exemption removal
-    (gate required in production).
-    """
-    with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
-        _audit_connect_requested(db, integration_id=integration_id, correlation_id=correlation_id)
-        return github_oauth_service.start_connect(db, integration_id)
 
 
 @router.get("/{integration_id}/github", response_model=GitHubConnectionResponse)

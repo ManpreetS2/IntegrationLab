@@ -103,15 +103,15 @@ the authorized GitHub user and prove a real provider connection.
 | Step | Method + path |
 |------|----------------|
 | Start connect | `POST /api/integrations/{id}/github/connect` (operator-authenticated; returns `{authorize_url}`) |
-| Start connect (redirect) | `GET /api/integrations/{id}/github/connect` (operator-authenticated; 302 → GitHub) |
 | Callback | `GET /api/oauth/github/callback` |
 | Profile | `GET /api/integrations/{id}/github` |
 | Check | `POST /api/integrations/{id}/github/check` |
 | Request logs | `GET /api/provider-requests` |
 
-Preferred console path: authenticated `POST` with `credentials: 'include'`, then
-navigate to `authorize_url`. The response sets an HttpOnly browser-nonce cookie
-required by the callback. Do not treat connect as a public UUID-only URL.
+Console path: authenticated `POST` with `credentials: 'include'`, then navigate
+to `authorize_url`. The response sets a per-state HttpOnly browser-nonce cookie
+required by the callback (parallel tabs do not clobber each other). There is no
+GET connect route. Do not treat connect as a public UUID-only URL.
 
 ## Flow (plain English)
 

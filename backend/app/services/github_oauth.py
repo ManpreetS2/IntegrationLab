@@ -36,9 +36,14 @@ from app.services.github_client import GitHubClient
 logger = logging.getLogger(__name__)
 
 OAUTH_SESSION_TTL = timedelta(minutes=10)
-BROWSER_NONCE_COOKIE = "il_github_oauth_nonce"
+BROWSER_NONCE_COOKIE_PREFIX = "il_gh_nonce_"
 BROWSER_NONCE_COOKIE_PATH = "/api/oauth/github"
 BROWSER_NONCE_MAX_AGE = int(OAUTH_SESSION_TTL.total_seconds())
+
+
+def browser_nonce_cookie_name(state: str) -> str:
+    """Cookie name scoped to one OAuth state so parallel tabs do not clobber each other."""
+    return f"{BROWSER_NONCE_COOKIE_PREFIX}{hash_oauth_state(state)[:16]}"
 
 
 class GitHubOAuthService:
@@ -70,9 +75,9 @@ class GitHubOAuthService:
             )
         return integration
 
-    def _set_browser_nonce_cookie(self, response: Response, nonce: str) -> None:
+    def _set_browser_nonce_cookie(self, response: Response, *, nonce: str, state: str) -> None:
         response.set_cookie(
-            key=BROWSER_NONCE_COOKIE,
+            key=browser_nonce_cookie_name(state),
             value=nonce,
             max_age=BROWSER_NONCE_MAX_AGE,
             path=BROWSER_NONCE_COOKIE_PATH,
@@ -81,9 +86,9 @@ class GitHubOAuthService:
             secure=self.settings.is_production(),
         )
 
-    def _clear_browser_nonce_cookie(self, response: Response) -> None:
+    def _clear_browser_nonce_cookie(self, response: Response, *, state: str) -> None:
         response.delete_cookie(
-            key=BROWSER_NONCE_COOKIE,
+            key=browser_nonce_cookie_name(state),
             path=BROWSER_NONCE_COOKIE_PATH,
         )
 
@@ -91,8 +96,8 @@ class GitHubOAuthService:
         self,
         session: Session,
         integration_id: UUID,
-    ) -> tuple[str, str]:
-        """Create a bound OAuth session; return (authorize_url, browser_nonce)."""
+    ) -> tuple[str, str, str]:
+        """Create a bound OAuth session; return (authorize_url, browser_nonce, state)."""
         self.require_oauth_config()
         integration = self._load_github_integration(session, integration_id)
 
@@ -118,20 +123,13 @@ class GitHubOAuthService:
             state=state,
             code_challenge=code_challenge,
         )
-        return authorize_url, browser_nonce
-
-    def start_connect(self, session: Session, integration_id: UUID) -> RedirectResponse:
-        """Create a bound OAuth session and redirect the browser to GitHub."""
-        authorize_url, browser_nonce = self._begin_oauth_session(session, integration_id)
-        response = RedirectResponse(url=authorize_url, status_code=status.HTTP_302_FOUND)
-        self._set_browser_nonce_cookie(response, browser_nonce)
-        return response
+        return authorize_url, browser_nonce, state
 
     def start_connect_json(self, session: Session, integration_id: UUID) -> JSONResponse:
         """Operator-authenticated start: return authorize_url and set the browser nonce cookie."""
-        authorize_url, browser_nonce = self._begin_oauth_session(session, integration_id)
+        authorize_url, browser_nonce, state = self._begin_oauth_session(session, integration_id)
         response = JSONResponse({"authorize_url": authorize_url})
-        self._set_browser_nonce_cookie(response, browser_nonce)
+        self._set_browser_nonce_cookie(response, nonce=browser_nonce, state=state)
         return response
 
     def _require_bound_oauth_session(
@@ -163,7 +161,7 @@ class GitHubOAuthService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OAuth state expired")
 
         expected_hash = oauth_session.browser_nonce_hash
-        provided = request.cookies.get(BROWSER_NONCE_COOKIE)
+        provided = request.cookies.get(browser_nonce_cookie_name(state))
         if not expected_hash or not provided or hash_oauth_state(provided) != expected_hash:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -306,7 +304,7 @@ class GitHubOAuthService:
             url=f"{self.settings.frontend_url.rstrip('/')}/?{query}",
             status_code=status.HTTP_302_FOUND,
         )
-        self._clear_browser_nonce_cookie(response)
+        self._clear_browser_nonce_cookie(response, state=state)
         return response
 
     def _handle_oauth_error(
@@ -349,7 +347,7 @@ class GitHubOAuthService:
             url=f"{self.settings.frontend_url.rstrip('/')}/?{query}",
             status_code=status.HTTP_302_FOUND,
         )
-        self._clear_browser_nonce_cookie(response)
+        self._clear_browser_nonce_cookie(response, state=state)
         return response
 
     def get_connection(
