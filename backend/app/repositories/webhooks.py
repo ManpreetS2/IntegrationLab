@@ -232,8 +232,18 @@ class WebhookAttemptRepository:
         session.flush()
         return attempt
 
-    def get(self, session: Session, attempt_id: UUID) -> WebhookProcessingAttemptORM | None:
-        return session.get(WebhookProcessingAttemptORM, attempt_id)
+    def get(
+        self,
+        session: Session,
+        attempt_id: UUID,
+        *,
+        populate_existing: bool = False,
+    ) -> WebhookProcessingAttemptORM | None:
+        return session.get(
+            WebhookProcessingAttemptORM,
+            attempt_id,
+            populate_existing=populate_existing,
+        )
 
     def list_for_event(
         self, session: Session, event_id: UUID

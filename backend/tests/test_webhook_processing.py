@@ -317,6 +317,101 @@ def test_late_original_worker_failure_does_not_unprocess_stale_reclaim(
     assert attempts[0].id == attempt_a_id
 
 
+def test_late_success_after_reclaim_separate_sessions(
+    db_session, TestingSessionLocal, stripe_integration_id
+):
+    """Two sessions: A claims, B reclaims while still in flight, A finishes OK.
+
+    Keeping a strong reference to A's attempt under expire_on_commit=False
+    used to bypass the guard when finish only checked the identity-map row.
+    """
+    from app.db.models.webhook import WebhookProcessingAttemptORM
+
+    event = store_event(db_session, stripe_integration_id, now=T0)
+    db_session.commit()
+    processor = StripeWebhookProcessor()
+
+    session_a = TestingSessionLocal()
+    claimed = processor._claim(session_a, event.id, now=T0, manual=False)
+    assert isinstance(claimed, tuple)
+    event_a, attempt_a_id = claimed
+    # Strong ref so the identity map retains A's attempt as in_progress.
+    _keep = session_a.get(WebhookProcessingAttemptORM, attempt_a_id)
+    assert _keep is not None
+    handler = processor.registry.get(event_a.event_type)
+    spec = handler(event_a)
+
+    session_b = TestingSessionLocal()
+    claimed_b = processor._claim(
+        session_b, event.id, now=T0 + timedelta(minutes=10), manual=False
+    )
+    assert isinstance(claimed_b, tuple)
+    _event_b, attempt_b_id = claimed_b
+
+    late = processor._finish_success(
+        session_a,
+        event.id,
+        attempt_a_id,
+        spec,
+        now=T0 + timedelta(minutes=11),
+    )
+    session_a.close()
+    session_b.close()
+
+    db_session.expire_all()
+    attempts = {
+        row.id: row.outcome
+        for row in webhook_attempt_repository.list_for_event(db_session, event.id)
+    }
+    assert late.outcome == ProcessOutcome.SKIPPED, attempts
+    assert attempts[attempt_a_id] == "abandoned"
+    assert attempts[attempt_b_id] == "in_progress"
+    assert _reload(db_session, event.id).processing_status == "processing"
+    assert _reload(db_session, event.id).attempt_count == 2
+
+
+def test_late_ignored_after_reclaim_separate_sessions(
+    db_session, TestingSessionLocal, stripe_integration_id
+):
+    from app.db.models.webhook import WebhookProcessingAttemptORM
+
+    event = store_event(
+        db_session,
+        stripe_integration_id,
+        event_type="customer.created",
+        event_id="evt_late_ignored",
+        object_id="cus_late",
+        now=T0,
+    )
+    db_session.commit()
+    processor = StripeWebhookProcessor()
+
+    session_a = TestingSessionLocal()
+    claimed = processor._claim(session_a, event.id, now=T0, manual=False)
+    assert isinstance(claimed, tuple)
+    _event_a, attempt_a_id = claimed
+    _keep = session_a.get(WebhookProcessingAttemptORM, attempt_a_id)
+    assert _keep is not None
+
+    session_b = TestingSessionLocal()
+    claimed_b = processor._claim(
+        session_b, event.id, now=T0 + timedelta(minutes=10), manual=False
+    )
+    assert isinstance(claimed_b, tuple)
+
+    late = processor._finish_ignored(
+        session_a, event.id, attempt_a_id, now=T0 + timedelta(minutes=11)
+    )
+    session_a.close()
+    session_b.close()
+
+    db_session.expire_all()
+    attempts = webhook_attempt_repository.list_for_event(db_session, event.id)
+    assert late.outcome == ProcessOutcome.SKIPPED
+    assert [a.outcome for a in attempts] == ["abandoned", "in_progress"]
+    assert attempts[0].id == attempt_a_id
+
+
 def test_event_ordering_is_not_assumed(db_session, stripe_integration_id):
     """A refund can arrive before the payment success; each is handled independently."""
     refund = store_event(

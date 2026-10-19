@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from threading import Barrier
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.telemetry import TelemetryEventIn
 from app.services.telemetry_limits import MAX_ACTIVE_CREDENTIALS
 from tests.stripe_helpers import make_event, post_event
 
@@ -120,3 +125,94 @@ def test_concurrent_pin_same_evidence_is_idempotent(client, stripe_integration_i
     assert len({body["id"] for body in bodies}) == 1
     detail = client.get(f"/api/support-cases/{case['id']}").json()
     assert len(detail["evidence"]) == 1
+
+
+def test_rotate_vs_ingest_does_not_deadlock(client, TestingSessionLocal, monkeypatch) -> None:
+    """Ingest locks the credential then takes FOR KEY SHARE on integrations;
+
+    rotate locks the integration (FOR NO KEY UPDATE) then the credential.
+    Plain FOR UPDATE on the integration row deadlocks with that KEY SHARE.
+    """
+    import app.services.ingestion_credentials as ic
+    import app.services.telemetry_ingest as ti
+
+    created = client.post(
+        "/api/integrations",
+        json={"name": "dl", "provider": "instrumented_http", "environment": "local"},
+    )
+    assert created.status_code == 201
+    iid = created.json()["id"]
+    issued = client.post(f"/api/integrations/{iid}/ingestion-credentials", json={}).json()
+
+    ingest_locked = threading.Event()
+    rotate_locked = threading.Event()
+    errors: list[str] = []
+
+    orig_insert = ti.telemetry_repository.insert_new
+
+    def slow_insert(session, rows):
+        ingest_locked.set()
+        rotate_locked.wait(5)
+        time.sleep(0.3)
+        return orig_insert(session, rows)
+
+    monkeypatch.setattr(ti.telemetry_repository, "insert_new", slow_insert)
+
+    orig_get = ic.repo.get
+
+    def slow_get(session, credential_id, *, for_update=False):
+        if for_update:
+            rotate_locked.set()
+        return orig_get(session, credential_id, for_update=for_update)
+
+    monkeypatch.setattr(ic.repo, "get", slow_get)
+
+    now = datetime.now(timezone.utc)
+    event = TelemetryEventIn.model_validate(
+        {
+            "event_id": str(uuid4()),
+            "integration_id": iid,
+            "occurred_at": now.isoformat(),
+            "kind": "http_observation",
+            "service": "svc",
+            "method": "GET",
+            "route_template": "/x",
+            "status_code": 200,
+            "duration_ms": 5,
+            "environment": "local",
+            "provenance": "sdk_reported",
+        }
+    )
+
+    def do_ingest() -> None:
+        session = TestingSessionLocal()
+        try:
+            ti.telemetry_ingest_service.accept(
+                session, credential_id=UUID(issued["id"]), events=[event]
+            )
+            session.commit()
+        except Exception as exc:  # noqa: BLE001 — collect for assertion
+            errors.append(f"ingest: {type(exc).__name__}: {str(exc).splitlines()[0]}")
+        finally:
+            session.close()
+
+    def do_rotate() -> None:
+        ingest_locked.wait(5)
+        session = TestingSessionLocal()
+        try:
+            ic.ingestion_credential_service.rotate(
+                session, UUID(iid), UUID(issued["id"]), label=None, correlation_id=None
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"rotate: {type(exc).__name__}: {str(exc).splitlines()[0]}")
+        finally:
+            session.close()
+
+    t1 = threading.Thread(target=do_ingest)
+    t2 = threading.Thread(target=do_rotate)
+    t1.start()
+    t2.start()
+    t1.join(30)
+    t2.join(30)
+    assert not t1.is_alive() and not t2.is_alive()
+    assert not errors, errors

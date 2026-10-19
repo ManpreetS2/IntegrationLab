@@ -216,7 +216,7 @@ class StripeWebhookProcessor:
         now: datetime,
     ) -> ProcessResult:
         event = webhook_event_repository.lock_for_update(session, event_id)
-        attempt = webhook_attempt_repository.get(session, attempt_id)
+        attempt = webhook_attempt_repository.get(session, attempt_id, populate_existing=True)
         if not self._attempt_still_owns_processing(event, attempt):
             session.rollback()
             return ProcessResult(event_id, ProcessOutcome.SKIPPED)
@@ -253,7 +253,7 @@ class StripeWebhookProcessor:
         now: datetime,
     ) -> ProcessResult:
         event = webhook_event_repository.lock_for_update(session, event_id)
-        attempt = webhook_attempt_repository.get(session, attempt_id)
+        attempt = webhook_attempt_repository.get(session, attempt_id, populate_existing=True)
         if not self._attempt_still_owns_processing(event, attempt):
             session.rollback()
             return ProcessResult(event_id, ProcessOutcome.SKIPPED)
@@ -276,7 +276,7 @@ class StripeWebhookProcessor:
         now: datetime,
     ) -> ProcessResult:
         event = webhook_event_repository.lock_for_update(session, event_id)
-        attempt = webhook_attempt_repository.get(session, attempt_id)
+        attempt = webhook_attempt_repository.get(session, attempt_id, populate_existing=True)
         # Stale reclaim closes the original attempt and may already have
         # processed the event. Never let a late finish rewrite that outcome.
         if not self._attempt_still_owns_processing(event, attempt):
@@ -319,12 +319,19 @@ class StripeWebhookProcessor:
 
     @staticmethod
     def _attempt_still_owns_processing(event: WebhookEventORM, attempt) -> bool:
-        """True only while this attempt is still the active PROCESSING owner."""
+        """True only while this attempt is still the active PROCESSING owner.
+
+        Compare ``attempt_number`` to the freshly locked ``event.attempt_count``
+        so a late finish cannot succeed after a stale reclaim merely because
+        ``expire_on_commit=False`` left an ``in_progress`` identity-map row.
+        """
         if attempt is None:
             return False
         if attempt.outcome != AttemptOutcome.IN_PROGRESS.value:
             return False
-        return event.processing_status == WebhookProcessingStatus.PROCESSING.value
+        if event.processing_status != WebhookProcessingStatus.PROCESSING.value:
+            return False
+        return attempt.attempt_number == event.attempt_count
 
     @staticmethod
     def _mark_failed(event: WebhookEventORM, *, now: datetime, code: str, message: str) -> None:
