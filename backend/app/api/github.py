@@ -6,11 +6,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
-from starlette.responses import RedirectResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from app.core.correlation import correlation_scope, parse_correlation_id, short_entity_id
 from app.core.database import get_db
-from app.models.github import GitHubCheckResponse, GitHubConnectionResponse
+from app.models.github import GitHubCheckResponse, GitHubConnectStartResponse, GitHubConnectionResponse
 from app.repositories.integrations import integration_repository
 from app.services.audit import audit_service
 from app.services.github_oauth import github_oauth_service
@@ -20,44 +20,74 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/integrations", tags=["github"])
 
 
+def _audit_connect_requested(
+    db: Session,
+    *,
+    integration_id: UUID,
+    correlation_id,
+) -> None:
+    """Best-effort audit for an authenticated GitHub connect start."""
+    integration = integration_repository.get_by_id(db, integration_id)
+    # Only audit a real GitHub integration handoff. Missing/wrong-provider
+    # targets must not leave a misleading "requested" success trail.
+    if integration is None or integration.provider != "github":
+        return
+    try:
+        audit_service.record(
+            db,
+            action="github_connect_requested",
+            target_type="integration",
+            target_id=integration_id,
+            integration_id=integration_id,
+            correlation_id=correlation_id,
+            actor_type="operator",
+            safe_summary=(
+                f"GitHub OAuth connect requested for integration "
+                f"{short_entity_id(integration_id)}"
+            ),
+            metadata={"provider": "github"},
+            commit=True,
+        )
+    except Exception:  # noqa: BLE001 — never weaken the OAuth start
+        logger.exception("Failed to audit GitHub connect start")
+        db.rollback()
+
+
+@router.post(
+    "/{integration_id}/github/connect",
+    response_model=GitHubConnectStartResponse,
+)
+def connect_github_start(
+    integration_id: UUID,
+    db: Session = Depends(get_db),
+    x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
+) -> JSONResponse:
+    """Start GitHub OAuth for the authenticated operator.
+
+    Creates the OAuth session, sets an HttpOnly browser-nonce cookie, and
+    returns ``{authorize_url}`` for the console to navigate to. Not a public
+    route — the operator bearer gate applies when configured.
+    """
+    with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
+        _audit_connect_requested(db, integration_id=integration_id, correlation_id=correlation_id)
+        return github_oauth_service.start_connect_json(db, integration_id)
+
+
 @router.get("/{integration_id}/github/connect")
 def connect_github(
     integration_id: UUID,
     db: Session = Depends(get_db),
     x_correlation_id: Optional[str] = Header(default=None, alias="X-Correlation-ID"),
 ) -> RedirectResponse:
-    """Start GitHub OAuth (browser navigation; returns a redirect).
+    """Start GitHub OAuth via browser redirect (operator-authenticated when gated).
 
-    Intentionally public for browser handoff. Audit uses actor_type
-    ``browser_handoff`` — not authenticated per-user identity.
-
-    Action is ``github_connect_requested`` (intent at the handoff boundary).
-    Missing integrations are not audited. Audit failure must not block OAuth.
+    Prefer POST + authorize_url navigation from the console so the operator
+    key can be sent as a Bearer header. This GET remains for same-origin
+    handoffs that already carry operator auth via middleware exemption removal
+    (gate required in production).
     """
     with correlation_scope(parse_correlation_id(x_correlation_id)) as correlation_id:
-        integration = integration_repository.get_by_id(db, integration_id)
-        # Only audit a real GitHub integration handoff. Missing/wrong-provider
-        # targets must not leave a misleading "requested" success trail.
-        if integration is not None and integration.provider == "github":
-            try:
-                audit_service.record(
-                    db,
-                    action="github_connect_requested",
-                    target_type="integration",
-                    target_id=integration_id,
-                    integration_id=integration_id,
-                    correlation_id=correlation_id,
-                    actor_type="browser_handoff",
-                    safe_summary=(
-                        f"GitHub OAuth connect requested for integration "
-                        f"{short_entity_id(integration_id)}"
-                    ),
-                    metadata={"provider": "github"},
-                    commit=True,
-                )
-            except Exception:  # noqa: BLE001 — never weaken the public OAuth handoff
-                logger.exception("Failed to audit GitHub connect handoff")
-                db.rollback()
+        _audit_connect_requested(db, integration_id=integration_id, correlation_id=correlation_id)
         return github_oauth_service.start_connect(db, integration_id)
 
 

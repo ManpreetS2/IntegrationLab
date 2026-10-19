@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -36,6 +37,8 @@ class OAuthSessionORM(Base):
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     state_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     code_verifier_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    # SHA-256 of the HttpOnly browser nonce set at connect; required at callback.
+    browser_nonce_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -99,6 +102,9 @@ class ProviderRequestLogORM(Base):
     """Observability row for outbound provider HTTP calls (no secrets)."""
 
     __tablename__ = "provider_request_logs"
+    __table_args__ = (
+        Index("ix_provider_request_logs_correlation_id", "correlation_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     integration_id: Mapped[UUID | None] = mapped_column(

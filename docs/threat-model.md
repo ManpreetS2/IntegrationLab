@@ -41,6 +41,7 @@ GitHub Actions
 | Operator key leaked into frontend bundle | Key is entered at runtime and kept in `sessionStorage`; Vite build never receives it |
 | Static AWS access keys leak from GitHub | Deploy uses GitHub OIDC with immutable repo/environment subject |
 | OAuth CSRF / callback replay | State + PKCE; state is expiring, single-use, and validated before callback handling |
+| Stolen integration UUID replaces GitHub connection | Connect start is operator-gated; callback also requires the HttpOnly browser-nonce cookie minted at start |
 | OAuth token stolen from DB | Token encrypted with Fernet before persistence |
 | Forged Stripe webhook | Signature verified against the exact raw request body before durable receipt |
 | Local Compose ports exposed on LAN | `docker-compose.full.yml` binds frontend/API to `127.0.0.1` only |
@@ -53,7 +54,7 @@ GitHub Actions
 | Cross-integration evidence pinned to wrong case | Pin validation requires evidence to belong to the case's integration |
 | Oversized support note / XSS in console | Server length limits; React text escaping (no raw HTML injection) |
 | Unauthenticated support/audit APIs | Same production Bearer gate as other `/api/*` operator routes |
-| GitHub connect audit over-claims identity | Connect remains public; audit is `github_connect_requested` with `actor_type=browser_handoff` and never stores OAuth secrets |
+| GitHub connect audit over-claims identity | Connect is operator-gated; audit is `github_connect_requested` with `actor_type=operator` and never stores OAuth secrets |
 | Free-form title/name copied into audit | Audit summaries/metadata are structural only (ids/enums/case numbers) |
 | Secret/config file baked into image | Docker ignore rules + CI image tar scan |
 | RDS exposed to internet | Private DB subnets; RDS SG accepts 5432 only from ECS SG |
@@ -71,12 +72,15 @@ These are intentionally not protected by the operator bearer gate:
 - `GET /ready`
 - `GET /auth/operator` (returns only whether auth is required)
 - `POST /webhooks/stripe/{integration_id}` (protected by Stripe signature)
-- `GET /api/oauth/github/callback` (protected by OAuth state/PKCE)
-- `GET /api/integrations/{uuid}/github/connect` (browser redirect handoff)
+- `GET /api/oauth/github/callback` (protected by OAuth state/PKCE **and** the
+  start-time HttpOnly browser-nonce cookie)
 
-The connect URL contains an unguessable integration UUID and only starts the
-OAuth flow; integration listing, diagnostics, retries, dismissals, and other
-operator actions remain authenticated.
+GitHub connect (`POST`/`GET /api/integrations/{uuid}/github/connect`) is
+**not** public. Starting OAuth requires the operator bearer key (when the gate
+is enabled). The console POSTs with that key, receives `{authorize_url}`, and
+navigates after the backend sets an HttpOnly `SameSite=Lax` nonce cookie.
+Knowing an integration UUID alone cannot create a completable OAuth session or
+overwrite a stored GitHub connection.
 
 ## Residual risks / deliberate portfolio tradeoffs
 

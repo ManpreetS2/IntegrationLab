@@ -59,6 +59,20 @@ def test_oauth_callback_stays_public_under_gate(gated_client: TestClient) -> Non
     assert response.status_code == 400
 
 
+def test_github_connect_requires_operator_key_under_gate(gated_client: TestClient) -> None:
+    integration_id = "8a8c4b3a-862a-4ddf-81f0-42d1861fdd9b"
+    get_response = gated_client.get(
+        f"/api/integrations/{integration_id}/github/connect",
+        follow_redirects=False,
+    )
+    assert get_response.status_code == 401
+
+    post_response = gated_client.post(
+        f"/api/integrations/{integration_id}/github/connect",
+    )
+    assert post_response.status_code == 401
+
+
 def test_options_preflight_is_not_blocked(gated_client: TestClient) -> None:
     response = gated_client.options(
         "/api/integrations",

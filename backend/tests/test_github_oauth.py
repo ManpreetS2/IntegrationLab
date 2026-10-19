@@ -264,3 +264,143 @@ def test_connect_missing_oauth_config(client, monkeypatch) -> None:
         follow_redirects=False,
     )
     assert response.status_code == 503
+
+
+def test_connect_post_returns_authorize_url_and_sets_nonce_cookie(client, db_session) -> None:
+    integration_id = _github_seed_id(client)
+
+    response = client.post(f"/api/integrations/{integration_id}/github/connect")
+    assert response.status_code == 200
+    body = response.json()
+    assert "authorize_url" in body
+    parsed = urlparse(body["authorize_url"])
+    assert parsed.netloc == "github.com"
+    assert "il_github_oauth_nonce" in response.cookies
+
+    sessions = list(db_session.scalars(select(OAuthSessionORM)).all())
+    assert len(sessions) == 1
+    assert sessions[0].browser_nonce_hash is not None
+
+
+@respx.mock
+def test_callback_without_browser_nonce_rejects_and_leaves_connection_unchanged(
+    client, db_session
+) -> None:
+    """Sessions started without the operator browser binding cannot overwrite credentials."""
+    integration_id = _github_seed_id(client)
+
+    # Establish a real connected baseline through the bound operator path.
+    start = client.get(
+        f"/api/integrations/{integration_id}/github/connect",
+        follow_redirects=False,
+    )
+    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    respx.post(GITHUB_TOKEN_URL).mock(
+        return_value=Response(
+            200,
+            json={"access_token": "gho_original_token", "scope": "read:user"},
+        )
+    )
+    respx.get("https://api.github.com/user").mock(
+        return_value=Response(
+            200,
+            json={
+                "id": 111,
+                "login": "original-owner",
+                "avatar_url": None,
+                "html_url": None,
+                "public_repos": 2,
+            },
+        )
+    )
+    first = client.get(
+        "/api/oauth/github/callback",
+        params={"code": "original-code", "state": state},
+        follow_redirects=False,
+    )
+    assert first.status_code == 302
+    original_cred = db_session.scalars(select(OAuthCredentialORM)).one()
+    original_ciphertext = original_cred.access_token_encrypted
+    assert TokenCipher().decrypt(original_ciphertext) == "gho_original_token"
+
+    # Simulate an unbound session (no browser_nonce_hash) — as if started without
+    # the authenticated connect path / cookie minting.
+    attack_state = generate_oauth_state()
+    oauth_session_repository.create(
+        db_session,
+        integration_id=UUID(integration_id),
+        provider="github",
+        state_hash=hash_oauth_state(attack_state),
+        code_verifier_encrypted=TokenCipher().encrypt("attacker-verifier"),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        browser_nonce_hash=None,
+    )
+    db_session.commit()
+
+    respx.post(GITHUB_TOKEN_URL).mock(
+        return_value=Response(
+            200,
+            json={"access_token": "gho_attacker_token", "scope": "read:user"},
+        )
+    )
+    respx.get("https://api.github.com/user").mock(
+        return_value=Response(
+            200,
+            json={
+                "id": 999,
+                "login": "attacker",
+                "avatar_url": None,
+                "html_url": None,
+                "public_repos": 0,
+            },
+        )
+    )
+
+    attack = client.get(
+        "/api/oauth/github/callback",
+        params={"code": "attacker-code", "state": attack_state},
+        follow_redirects=False,
+    )
+    assert attack.status_code == 400
+    assert attack.json()["detail"] == "OAuth browser binding missing or invalid"
+
+    db_session.expire_all()
+    cred = db_session.scalars(select(OAuthCredentialORM)).one()
+    assert cred.access_token_encrypted == original_ciphertext
+    profile = client.get(f"/api/integrations/{integration_id}/github").json()
+    assert profile["login"] == "original-owner"
+
+
+@respx.mock
+def test_callback_rejects_wrong_browser_nonce(client, db_session) -> None:
+    integration_id = _github_seed_id(client)
+    start = client.get(
+        f"/api/integrations/{integration_id}/github/connect",
+        follow_redirects=False,
+    )
+    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+
+    # Drop the legitimate cookie and plant a forged one.
+    client.cookies.clear()
+    client.cookies.set("il_github_oauth_nonce", "forged-nonce", path="/api/oauth/github")
+
+    respx.post(GITHUB_TOKEN_URL).mock(
+        return_value=Response(
+            200,
+            json={"access_token": "gho_should_not_store", "scope": "read:user"},
+        )
+    )
+    respx.get("https://api.github.com/user").mock(
+        return_value=Response(
+            200,
+            json={"id": 1, "login": "nope", "avatar_url": None, "html_url": None, "public_repos": 0},
+        )
+    )
+
+    response = client.get(
+        "/api/oauth/github/callback",
+        params={"code": "x", "state": state},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert list(db_session.scalars(select(OAuthCredentialORM)).all()) == []

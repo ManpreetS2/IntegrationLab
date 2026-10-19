@@ -102,31 +102,34 @@ the authorized GitHub user and prove a real provider connection.
 
 | Step | Method + path |
 |------|----------------|
-| Start connect | `GET /api/integrations/{id}/github/connect` |
+| Start connect | `POST /api/integrations/{id}/github/connect` (operator-authenticated; returns `{authorize_url}`) |
+| Start connect (redirect) | `GET /api/integrations/{id}/github/connect` (operator-authenticated; 302 → GitHub) |
 | Callback | `GET /api/oauth/github/callback` |
 | Profile | `GET /api/integrations/{id}/github` |
 | Check | `POST /api/integrations/{id}/github/check` |
 | Request logs | `GET /api/provider-requests` |
 
-Connect is a **browser navigation** (302 → GitHub). Do not `fetch()` it expecting JSON.
+Preferred console path: authenticated `POST` with `credentials: 'include'`, then
+navigate to `authorize_url`. The response sets an HttpOnly browser-nonce cookie
+required by the callback. Do not treat connect as a public UUID-only URL.
 
 ## Flow (plain English)
 
-1. Dashboard **Connect GitHub** sends the browser to the backend start URL.
-2. Backend creates an OAuth session (`state` hash + encrypted PKCE verifier) and redirects to GitHub.
-3. User approves on GitHub.
+1. Dashboard **Connect GitHub** POSTs to the backend start URL with the operator key.
+2. Backend creates an OAuth session (`state` hash + encrypted PKCE verifier + browser-nonce hash), sets the HttpOnly nonce cookie, and returns `{authorize_url}`.
+3. The console navigates to GitHub; user approves.
 4. GitHub redirects to the backend callback with `code` + `state`.
-5. Backend validates state (exists, unused, unexpired), decrypts the verifier, exchanges the code for an access token.
+5. Backend validates state (exists, unused, unexpired) **and** the browser-nonce cookie, decrypts the verifier, exchanges the code for an access token.
 6. Backend calls `GET https://api.github.com/user` with the token.
 7. Backend stores the **encrypted** token, safe profile metadata, marks the integration `connected`, and redirects to the frontend with `/?oauth=github&status=connected`.
 8. React never sees the access token.
 
 Cancel / error callbacks (`?error=access_denied&state=...`) go through the same
-state validation. The request is only treated as our flow when `state` is
-present, known, for GitHub, unused, and unexpired. In that case the state is
-marked used and the browser is redirected to
+state + browser-nonce validation. The request is only treated as our flow when
+`state` is present, known, for GitHub, unused, unexpired, and the nonce cookie
+matches. In that case the state is marked used and the browser is redirected to
 `/?oauth=github&status=cancelled` (or `status=error` for other errors).
-Missing, unknown, expired, or reused state returns HTTP 400.
+Missing, unknown, expired, reused, or unbound state returns HTTP 400.
 `error_description` is never reflected back.
 
 ## Security checklist

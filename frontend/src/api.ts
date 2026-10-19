@@ -129,6 +129,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers,
+    // Preserve caller credentials (needed for GitHub OAuth browser-nonce cookie).
+    credentials: init?.credentials ?? 'same-origin',
   })
 
   if (!response.ok) {
@@ -221,8 +223,12 @@ export function getTelemetryHealth(integrationId: string, windowHours = 24): Pro
   )
 }
 
-export function githubConnectUrl(integrationId: string): string {
-  return `${API_URL}/api/integrations/${integrationId}/github/connect`
+/** Operator-authenticated OAuth start; sets the browser-nonce cookie, then navigate to authorize_url. */
+export async function startGitHubConnect(integrationId: string): Promise<{ authorize_url: string }> {
+  return request<{ authorize_url: string }>(`/api/integrations/${integrationId}/github/connect`, {
+    method: 'POST',
+    credentials: 'include',
+  })
 }
 
 export function getGitHubConnection(integrationId: string): Promise<GitHubConnection> {

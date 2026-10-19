@@ -656,7 +656,7 @@ def test_github_connect_requested_audit_semantics(
     assert len(audit) == 1
     row = audit[0]
     assert row["action"] == "github_connect_requested"
-    assert row["actor_type"] == "browser_handoff"
+    assert row["actor_type"] == "operator"
     assert row["correlation_id"] == correlation
     assert row["integration_id"] == github_integration_id
     assert row["metadata"] == {"provider": "github"}

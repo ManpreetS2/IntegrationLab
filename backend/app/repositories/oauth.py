@@ -26,6 +26,7 @@ class OAuthSessionRepository:
         state_hash: str,
         code_verifier_encrypted: str,
         expires_at: datetime,
+        browser_nonce_hash: str | None = None,
     ) -> OAuthSessionORM:
         row = OAuthSessionORM(
             id=uuid4(),
@@ -33,6 +34,7 @@ class OAuthSessionRepository:
             provider=provider,
             state_hash=state_hash,
             code_verifier_encrypted=code_verifier_encrypted,
+            browser_nonce_hash=browser_nonce_hash,
             created_at=datetime.now(timezone.utc),
             expires_at=expires_at,
             used_at=None,
