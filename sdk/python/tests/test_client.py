@@ -330,6 +330,7 @@ def test_parse_retry_after_rejects_junk_and_oversized_digits() -> None:
     assert parse_retry_after("-5") is None
     assert parse_retry_after("abc 2") is None
     assert parse_retry_after("1" * 11) is None
+    assert parse_retry_after("1" * 400) is None
     assert parse_retry_after("not-a-date") is None
 
 

@@ -305,7 +305,9 @@ test("parseRetryAfterMs rejects junk and oversized digit strings", () => {
   assert.equal(parseRetryAfterMs("-5"), null);
   assert.equal(parseRetryAfterMs("1.5"), null);
   assert.equal(parseRetryAfterMs("abc 2"), null);
+  assert.equal(parseRetryAfterMs("²"), null);
   assert.equal(parseRetryAfterMs("1".repeat(11)), null);
+  assert.equal(parseRetryAfterMs("1".repeat(400)), null);
   assert.equal(parseRetryAfterMs("not-a-date"), null);
 });
 

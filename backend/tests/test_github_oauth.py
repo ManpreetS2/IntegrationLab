@@ -399,7 +399,7 @@ def test_get_connect_route_is_removed(client) -> None:
 
 @respx.mock
 def test_parallel_connects_keep_separate_nonce_cookies(client, db_session) -> None:
-    """A second tab's connect must not invalidate the first tab's callback."""
+    """Two tabs in one browser both complete; cookies are not clobbered."""
     integration_id = _github_seed_id(client)
     first_url = _start_connect(client, integration_id)
     first_state = _state_from_authorize_url(first_url)
@@ -415,28 +415,51 @@ def test_parallel_connects_keep_separate_nonce_cookies(client, db_session) -> No
     assert client.cookies.get(second_cookie)
 
     respx.post(GITHUB_TOKEN_URL).mock(
-        return_value=Response(
-            200,
-            json={"access_token": "gho_first_tab", "scope": "read:user"},
-        )
+        side_effect=[
+            Response(200, json={"access_token": "gho_first_tab", "scope": "read:user"}),
+            Response(200, json={"access_token": "gho_second_tab", "scope": "read:user"}),
+        ]
     )
     respx.get("https://api.github.com/user").mock(
-        return_value=Response(
-            200,
-            json={
-                "id": 7,
-                "login": "first-tab",
-                "avatar_url": None,
-                "html_url": None,
-                "public_repos": 1,
-            },
-        )
+        side_effect=[
+            Response(
+                200,
+                json={
+                    "id": 7,
+                    "login": "first-tab",
+                    "avatar_url": None,
+                    "html_url": None,
+                    "public_repos": 1,
+                },
+            ),
+            Response(
+                200,
+                json={
+                    "id": 8,
+                    "login": "second-tab",
+                    "avatar_url": None,
+                    "html_url": None,
+                    "public_repos": 2,
+                },
+            ),
+        ]
     )
-    callback = client.get(
+    first_callback = client.get(
         "/api/oauth/github/callback",
         params={"code": "first-code", "state": first_state},
         follow_redirects=False,
     )
-    assert callback.status_code == 302
+    assert first_callback.status_code == 302
     profile = client.get(f"/api/integrations/{integration_id}/github").json()
     assert profile["login"] == "first-tab"
+
+    # Second tab's nonce cookie must still be present after the first completes.
+    assert client.cookies.get(second_cookie)
+    second_callback = client.get(
+        "/api/oauth/github/callback",
+        params={"code": "second-code", "state": second_state},
+        follow_redirects=False,
+    )
+    assert second_callback.status_code == 302
+    profile = client.get(f"/api/integrations/{integration_id}/github").json()
+    assert profile["login"] == "second-tab"
