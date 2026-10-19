@@ -255,10 +255,30 @@ def test_sanitize_route_drops_query_and_identifiers() -> None:
 
 
 def test_sanitize_route_root_url_is_server_valid() -> None:
-    assert sanitize_route("https://api.example.com/") == "/{root}"
-    assert sanitize_route("https://api.example.com") == "/{root}"
-    assert is_valid_route_template("/{root}")
-    assert not is_valid_route_template("/")
+    assert sanitize_route("https://api.example.com/") == "/"
+    assert sanitize_route("https://api.example.com") == "/"
+    assert is_valid_route_template("/")
+
+
+def test_sanitize_route_percent_encoded_digits_become_placeholder() -> None:
+    route = sanitize_route("https://x.com/%31%32%33%34%35%36%37")
+    assert route == "/{id}"
+    assert is_valid_route_template(route)
+
+
+def test_sanitize_route_truncates_on_segment_boundary() -> None:
+    long_seg = "a" * 120
+    route = sanitize_route(f"https://x.com/{long_seg}/{long_seg}")
+    assert len(route) <= 200
+    assert is_valid_route_template(route)
+    assert not route.endswith("{id")
+
+
+def test_sanitize_route_normalizes_invalid_segments() -> None:
+    assert sanitize_route("https://x.com/a{b}") == "/{id}"
+    assert sanitize_route("https://x.com/%7Bid%7Dx") == "/{id}"
+    assert sanitize_route("https://x.com/%C3%A9") == "/{id}"
+    assert is_valid_route_template(sanitize_route("https://x.com/weird"))
 
 
 def test_record_http_rejects_invalid_route_without_queueing() -> None:
@@ -268,7 +288,7 @@ def test_record_http_rejects_invalid_route_without_queueing() -> None:
             lab.record_http(
                 service="orders-api",
                 method="GET",
-                route_template="/",
+                route_template="/a//b",
                 status_code=200,
                 duration_ms=1,
             )

@@ -254,7 +254,7 @@ A batch is atomic for validation: if any event is malformed, nothing is stored a
 | `kind` | Only `http_observation`. |
 | `service` | 1–63 characters, `^[a-z0-9][a-z0-9._-]{0,62}$`. A remote service label, not the IntegrationLab provider enum. |
 | `method` | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`. |
-| `route_template` | Absolute path template, max 200 characters. Must start with `/`. No scheme, query (`?`), fragment (`#`), userinfo (`@`), whitespace, backslash, or percent-encoding. Segments are static literals or `{placeholder}` names. Raw UUIDs, 16+ hex runs, and digit runs longer than 6 are rejected so identifiers are not used as routes. |
+| `route_template` | Absolute path template, max 200 characters. Must start with `/`. A lone `/` is valid (root path). No scheme, query (`?`), fragment (`#`), userinfo (`@`), whitespace, backslash, or percent-encoding. Segments are static literals or `{placeholder}` names. Raw UUIDs, 16+ hex runs, and digit runs longer than 6 are rejected so identifiers are not used as routes. |
 | `status_code` | Integer 200–599, or `null` when no HTTP response was received. |
 | `duration_ms` | Integer 0 through 300000. |
 | `error_category` | See the table below. Must match `status_code`. |

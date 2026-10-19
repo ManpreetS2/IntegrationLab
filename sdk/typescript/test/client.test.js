@@ -230,10 +230,30 @@ test("sanitizeRoute removes queries and identifiers", () => {
 });
 
 test("sanitizeRoute root URL is server-valid", () => {
-  assert.equal(sanitizeRoute("https://api.example.com/"), "/{root}");
-  assert.equal(sanitizeRoute("https://api.example.com"), "/{root}");
-  assert.equal(isValidRouteTemplate("/{root}"), true);
-  assert.equal(isValidRouteTemplate("/"), false);
+  assert.equal(sanitizeRoute("https://api.example.com/"), "/");
+  assert.equal(sanitizeRoute("https://api.example.com"), "/");
+  assert.equal(isValidRouteTemplate("/"), true);
+});
+
+test("sanitizeRoute percent-encoded digits become placeholder", () => {
+  const route = sanitizeRoute("https://x.com/%31%32%33%34%35%36%37");
+  assert.equal(route, "/{id}");
+  assert.equal(isValidRouteTemplate(route), true);
+});
+
+test("sanitizeRoute truncates on segment boundary", () => {
+  const longSeg = "a".repeat(120);
+  const route = sanitizeRoute(`https://x.com/${longSeg}/${longSeg}`);
+  assert.ok(route.length <= 200);
+  assert.equal(isValidRouteTemplate(route), true);
+  assert.equal(route.endsWith("{id"), false);
+});
+
+test("sanitizeRoute normalizes invalid segments", () => {
+  assert.equal(sanitizeRoute("https://x.com/a{b}"), "/{id}");
+  assert.equal(sanitizeRoute("https://x.com/%7Bid%7Dx"), "/{id}");
+  assert.equal(sanitizeRoute("https://x.com/%C3%A9"), "/{id}");
+  assert.equal(isValidRouteTemplate(sanitizeRoute("https://x.com/weird")), true);
 });
 
 test("recordHttp rejects invalid route without queueing", async () => {
@@ -246,7 +266,7 @@ test("recordHttp rejects invalid route without queueing", async () => {
     lab.recordHttp({
       service: "orders-api",
       method: "GET",
-      routeTemplate: "/",
+      routeTemplate: "/a//b",
       statusCode: 200,
       durationMs: 1,
     }),
@@ -307,7 +327,7 @@ test("instrumentFetch root URL does not poison the batch", async () => {
   assert.equal(result.accepted, 2);
   assert.equal(result.dropped, 0);
   const routes = calls.flatMap((batch) => batch.events.map((event) => event.route_template));
-  assert.deepEqual(routes.sort(), ["/{root}", "/v1/orders/{id}"].sort());
+  assert.deepEqual(routes.sort(), ["/", "/v1/orders/{id}"].sort());
 });
 
 test("honors Retry-After seconds without consuming the retry budget", async () => {

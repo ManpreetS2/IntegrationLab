@@ -86,6 +86,8 @@ def is_valid_route_template(value: str) -> bool:
         return False
     if any(char in _ROUTE_FORBIDDEN for char in value) or "://" in value or "//" in value:
         return False
+    if value == "/":
+        return True
     segments = value.split("/")[1:]
     if not segments or any(segment == "" for segment in segments):
         return False

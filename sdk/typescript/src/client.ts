@@ -381,6 +381,7 @@ const ROUTE_FORBIDDEN = /[ ?#\\@%]/;
 export function isValidRouteTemplate(value: string): boolean {
   if (!value.startsWith("/") || value.length > 200) return false;
   if (ROUTE_FORBIDDEN.test(value) || value.includes("://") || value.includes("//")) return false;
+  if (value === "/") return true;
   const segments = value.split("/").slice(1);
   if (segments.length === 0 || segments.some((segment) => segment === "")) return false;
   for (const segment of segments) {
@@ -399,6 +400,50 @@ export function isValidRouteTemplate(value: string): boolean {
   return true;
 }
 
+const ROUTE_LITERAL_CHAR = /[A-Za-z0-9._~!$&'()*+,;=-]/;
+const MAX_ROUTE_LEN = 200;
+const FALLBACK_ROUTE = "/{path}";
+
+function normalizeSegment(raw: string): string {
+  let segment = raw;
+  try {
+    segment = decodeURIComponent(raw);
+  } catch {
+    segment = raw;
+  }
+  if (!segment) return "{id}";
+  if (segment.startsWith("{") && segment.endsWith("}") && ROUTE_PLACEHOLDER.test(segment.slice(1, -1))) {
+    return segment;
+  }
+  if (segment.includes("{") || segment.includes("}")) return "{id}";
+  if (looksLikeIdentifier(segment)) return "{id}";
+  const cleaned = [...segment]
+    .filter((ch) => ROUTE_LITERAL_CHAR.test(ch))
+    .join("")
+    .slice(0, 64);
+  return cleaned || "{id}";
+}
+
+function joinSegments(segments: string[]): string {
+  if (segments.length === 0) return "/";
+  return `/${segments.join("/")}`;
+}
+
+function truncateOnSegmentBoundary(route: string): string {
+  if (route.length <= MAX_ROUTE_LEN) return route;
+  if (route === "/") return route;
+  const parts = route.split("/").slice(1);
+  const kept: string[] = [];
+  for (const part of parts) {
+    const candidate = `/${[...kept, part].join("/")}`;
+    if (candidate.length > MAX_ROUTE_LEN) break;
+    kept.push(part);
+  }
+  if (kept.length === 0) return FALLBACK_ROUTE;
+  const truncated = `/${kept.join("/")}`;
+  return isValidRouteTemplate(truncated) ? truncated : FALLBACK_ROUTE;
+}
+
 export function sanitizeRoute(url: string): string {
   let path = "/";
   try {
@@ -409,10 +454,11 @@ export function sanitizeRoute(url: string): string {
   const segments = path
     .split("/")
     .filter((segment) => segment && segment !== "." && segment !== "..")
-    .map((segment) => (looksLikeIdentifier(segment) ? "{id}" : segment.replace(/[^\w.~!$&'()*+,;=-]/g, "").slice(0, 64) || "{id}"));
-  // Root URLs have no path segments; "/" is rejected by the server.
-  const route = segments.length > 0 ? `/${segments.join("/")}` : "/{root}";
-  return route.slice(0, 200);
+    .map((segment) => normalizeSegment(segment));
+  let route = joinSegments(segments);
+  route = truncateOnSegmentBoundary(route);
+  if (!isValidRouteTemplate(route)) route = FALLBACK_ROUTE;
+  return route;
 }
 
 function looksLikeIdentifier(segment: string): boolean {

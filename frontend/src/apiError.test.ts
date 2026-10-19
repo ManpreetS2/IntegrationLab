@@ -27,6 +27,14 @@ test('errorMessage parses FastAPI 422 list detail', () => {
   assert.equal(errorMessage(err), 'String should have at least 1 character')
 })
 
+test('errorMessage for integration create failures', () => {
+  const err = new ApiError(409, '{"detail":"An integration with this name already exists"}')
+  assert.equal(
+    errorMessage(err, 'Failed to create integration.'),
+    'An integration with this name already exists',
+  )
+})
+
 test('errorMessage keeps 503 database shortcut', () => {
   const err = new ApiError(503, '{"detail":"Database temporarily unavailable"}')
   assert.equal(errorMessage(err), 'Database unavailable.')
