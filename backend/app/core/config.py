@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     # endpoint returns 503 until it is configured.
     stripe_webhook_secret: str | None = None
 
+    expose_api_docs: bool = Field(
+        default=False,
+        description="When true, expose /docs, /redoc, and /openapi.json in production.",
+    )
+
     @model_validator(mode="after")
     def resolve_secrets_and_database(self) -> Settings:
         """Fill app secrets, resolve DATABASE_URL, then enforce production guards."""
@@ -152,6 +157,12 @@ class Settings(BaseSettings):
 
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    def api_docs_enabled(self) -> bool:
+        """OpenAPI UIs are on in development and test; production hides them unless opted in."""
+        if not self.is_production():
+            return True
+        return self.expose_api_docs
 
 
 @lru_cache

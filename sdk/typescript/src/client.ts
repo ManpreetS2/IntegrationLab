@@ -164,6 +164,7 @@ export class IntegrationLabClient {
     if (this.timeoutMs <= 0 || this.maxQueue < 1 || this.batchSize < 1 || this.maxRetries < 1) {
       throw new IntegrationLabConfigError("timeout, queue, batch size, and retries must be positive");
     }
+    warnPlainHttpIfNeeded(parsed);
   }
 
   static fromEnv(env: NodeJS.ProcessEnv = process.env, overrides: Partial<ClientConfig> = {}): IntegrationLabClient {
@@ -486,6 +487,39 @@ function parseBaseUrl(value: string): string {
     throw new IntegrationLabConfigError("baseUrl must be an http or https URL");
   }
   return value.replace(/\/+$/, "");
+}
+
+const PLAIN_HTTP_WARNING =
+  "IntegrationLab baseUrl uses plain HTTP to a non-loopback host; prefer HTTPS in production.";
+
+function isLoopbackHost(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost" || lower === "::1") {
+    return true;
+  }
+  if (lower.includes(".")) {
+    const octets = lower.split(".");
+    if (octets.length === 4 && octets[0] === "127") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function warnPlainHttpIfNeeded(baseUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return;
+  }
+  if (url.protocol !== "http:") {
+    return;
+  }
+  if (isLoopbackHost(url.hostname)) {
+    return;
+  }
+  console.warn(PLAIN_HTTP_WARNING);
 }
 
 function isUuid(value: string): boolean {

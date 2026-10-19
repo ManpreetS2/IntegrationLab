@@ -506,6 +506,37 @@ test("delivers to a local HTTP server and preserves the upstream result", async 
   }
 });
 
+test("warns once for plain HTTP to a non-loopback host", () => {
+  const messages = [];
+  const original = console.warn;
+  console.warn = (message) => {
+    messages.push(String(message));
+  };
+  try {
+    client(ok, { baseUrl: "http://telemetry.example.com" });
+    assert.equal(messages.length, 1);
+    assert.match(messages[0], /plain HTTP/i);
+  } finally {
+    console.warn = original;
+  }
+});
+
+test("does not warn for HTTPS or loopback HTTP", () => {
+  const messages = [];
+  const original = console.warn;
+  console.warn = (message) => {
+    messages.push(String(message));
+  };
+  try {
+    client(ok, { baseUrl: "https://telemetry.example.com" });
+    client(ok, { baseUrl: "http://127.0.0.1:8010" });
+    client(ok, { baseUrl: "http://localhost:8010" });
+    assert.equal(messages.length, 0);
+  } finally {
+    console.warn = original;
+  }
+});
+
 function waitFor(predicate) {
   return new Promise((resolve, reject) => {
     const started = Date.now();

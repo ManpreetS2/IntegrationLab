@@ -29,6 +29,8 @@ export INTEGRATIONLAB_ENVIRONMENT=local
 
 `INTEGRATIONLAB_INGESTION_CREDENTIAL` is the ingestion credential shown once by IntegrationLab. It is not the operator API key.
 
+Plain `http://` endpoints are allowed; the client emits one `UserWarning` per instance when the host is not loopback (`localhost`, `127.x.x.x`, `::1`). Prefer HTTPS in production.
+
 ## Record manually
 
 ```python

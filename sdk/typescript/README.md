@@ -29,6 +29,8 @@ export INTEGRATIONLAB_ENVIRONMENT=local
 
 The credential is the ingestion credential IntegrationLab shows once. It is not the operator API key.
 
+Plain `http://` endpoints are allowed; the client logs one `console.warn` per instance when the host is not loopback (`localhost`, `127.x.x.x`, `::1`). Prefer HTTPS in production.
+
 ## Use
 
 ```typescript

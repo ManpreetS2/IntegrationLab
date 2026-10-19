@@ -8,9 +8,11 @@ request and is omitted from ``repr``.
 from __future__ import annotations
 
 import atexit
+import ipaddress
 import json
 import os
 import re
+import warnings
 import threading
 import time
 import urllib.error
@@ -44,6 +46,30 @@ _IMF_FIXDATE_RE = re.compile(
 
 # (status_code, body, response_headers)
 Transport = Callable[[str, bytes, dict[str, str], float], tuple[int, bytes, Mapping[str, str]]]
+
+_PLAIN_HTTP_WARNING = (
+    "IntegrationLab base_url uses plain HTTP to a non-loopback host; "
+    "prefer HTTPS in production."
+)
+
+
+def _is_loopback_host(hostname: str) -> bool:
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _warn_plain_http_base_url(base_url: str) -> None:
+    parsed = urlparse(base_url.strip())
+    if parsed.scheme != "http":
+        return
+    host = parsed.hostname
+    if not host or _is_loopback_host(host):
+        return
+    warnings.warn(_PLAIN_HTTP_WARNING, UserWarning, stacklevel=3)
 
 
 class IntegrationLabConfigError(ValueError):
@@ -106,6 +132,7 @@ class IntegrationLabClient:
         if timeout_seconds <= 0 or max_queue < 1 or batch_size < 1 or max_retries < 1:
             raise IntegrationLabConfigError("timeout, queue, batch size, and retries must be positive")
 
+        _warn_plain_http_base_url(base_url)
         self._base_url = base_url.rstrip("/")
         self._integration_id = str(integration_id)
         self._credential = credential

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import warnings
 from uuid import uuid4
 
 import pytest
@@ -464,3 +465,35 @@ def test_config_rejects_operator_key_and_loads_env() -> None:
         )
         lab.flush(timeout=2)
     assert transport.calls
+
+
+def test_plain_http_remote_emits_one_warning() -> None:
+    transport = Transport(_ok)
+    with pytest.warns(UserWarning, match="plain HTTP"):
+        with IntegrationLabClient(
+            base_url="http://telemetry.example.com",
+            integration_id=INTEGRATION_ID,
+            credential=CREDENTIAL,
+            transport=transport,
+        ):
+            pass
+
+
+def test_https_and_loopback_http_do_not_warn() -> None:
+    transport = Transport(_ok)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", category=UserWarning)
+        with IntegrationLabClient(
+            base_url="https://telemetry.example.com",
+            integration_id=INTEGRATION_ID,
+            credential=CREDENTIAL,
+            transport=transport,
+        ):
+            pass
+        with IntegrationLabClient(
+            base_url="http://localhost:8010",
+            integration_id=INTEGRATION_ID,
+            credential=CREDENTIAL,
+            transport=transport,
+        ):
+            pass
