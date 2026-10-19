@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.db.models.oauth import (
@@ -47,8 +48,34 @@ class OAuthSessionRepository:
         statement = select(OAuthSessionORM).where(OAuthSessionORM.state_hash == state_hash)
         return session.scalars(statement).first()
 
+    def claim_unused(
+        self,
+        session: Session,
+        oauth_session: OAuthSessionORM,
+        *,
+        now: datetime | None = None,
+    ) -> OAuthSessionORM | None:
+        """Atomically mark a session used. Returns the row, or None if already claimed."""
+        claimed_at = now or datetime.now(timezone.utc)
+        statement = (
+            update(OAuthSessionORM)
+            .where(
+                OAuthSessionORM.id == oauth_session.id,
+                OAuthSessionORM.used_at.is_(None),
+            )
+            .values(used_at=claimed_at)
+            .returning(OAuthSessionORM.id)
+        )
+        claimed_id = session.execute(statement).scalar_one_or_none()
+        if claimed_id is None:
+            return None
+        session.refresh(oauth_session)
+        return oauth_session
+
     def mark_used(self, session: Session, oauth_session: OAuthSessionORM) -> None:
-        oauth_session.used_at = datetime.now(timezone.utc)
+        """Idempotent local mark after a successful claim_unused."""
+        if oauth_session.used_at is None:
+            oauth_session.used_at = datetime.now(timezone.utc)
         session.add(oauth_session)
 
 
@@ -73,10 +100,10 @@ class OAuthCredentialRepository:
         token_type: str | None,
         granted_scopes: str | None,
     ) -> OAuthCredentialORM:
-        existing = self.get_by_integration_id(session, integration_id)
         now = datetime.now(timezone.utc)
-        if existing is None:
-            row = OAuthCredentialORM(
+        statement = (
+            pg_insert(OAuthCredentialORM)
+            .values(
                 id=uuid4(),
                 integration_id=integration_id,
                 provider=provider,
@@ -86,18 +113,23 @@ class OAuthCredentialRepository:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(row)
-            session.flush()
-            return row
-
-        existing.provider = provider
-        existing.access_token_encrypted = access_token_encrypted
-        existing.token_type = token_type
-        existing.granted_scopes = granted_scopes
-        existing.updated_at = now
-        session.add(existing)
-        session.flush()
-        return existing
+            .on_conflict_do_update(
+                constraint="uq_oauth_credentials_integration_id",
+                set_={
+                    "provider": provider,
+                    "access_token_encrypted": access_token_encrypted,
+                    "token_type": token_type,
+                    "granted_scopes": granted_scopes,
+                    "updated_at": now,
+                },
+            )
+            .returning(OAuthCredentialORM.id)
+        )
+        credential_id = session.execute(statement).scalar_one()
+        session.expire_all()
+        row = session.get(OAuthCredentialORM, credential_id)
+        assert row is not None
+        return row
 
 
 class GitHubProfileRepository:
@@ -119,10 +151,10 @@ class GitHubProfileRepository:
         html_url: str | None,
         public_repos: int | None,
     ) -> GitHubProfileORM:
-        existing = self.get_by_integration_id(session, integration_id)
         now = datetime.now(timezone.utc)
-        if existing is None:
-            row = GitHubProfileORM(
+        statement = (
+            pg_insert(GitHubProfileORM)
+            .values(
                 integration_id=integration_id,
                 github_user_id=github_user_id,
                 login=login,
@@ -132,19 +164,24 @@ class GitHubProfileRepository:
                 connected_at=now,
                 last_synced_at=now,
             )
-            session.add(row)
-            session.flush()
-            return row
-
-        existing.github_user_id = github_user_id
-        existing.login = login
-        existing.avatar_url = avatar_url
-        existing.html_url = html_url
-        existing.public_repos = public_repos
-        existing.last_synced_at = now
-        session.add(existing)
-        session.flush()
-        return existing
+            .on_conflict_do_update(
+                index_elements=[GitHubProfileORM.integration_id],
+                set_={
+                    "github_user_id": github_user_id,
+                    "login": login,
+                    "avatar_url": avatar_url,
+                    "html_url": html_url,
+                    "public_repos": public_repos,
+                    "last_synced_at": now,
+                },
+            )
+            .returning(GitHubProfileORM.integration_id)
+        )
+        profile_id = session.execute(statement).scalar_one()
+        session.expire_all()
+        row = session.get(GitHubProfileORM, profile_id)
+        assert row is not None
+        return row
 
 
 class ProviderRequestLogRepository:

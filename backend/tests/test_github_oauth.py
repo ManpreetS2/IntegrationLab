@@ -1,15 +1,19 @@
 """GitHub OAuth start/callback tests with mocked HTTP."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 import respx
+from fastapi.testclient import TestClient
 from httpx import Response
 from sqlalchemy import select
 
 from app.core.security import TokenCipher, generate_oauth_state, hash_oauth_state
 from app.db.models.oauth import OAuthCredentialORM, OAuthSessionORM
+from app.main import app
 from app.repositories.oauth import oauth_session_repository
 from app.services.github_client import GITHUB_TOKEN_URL
 from app.services.github_oauth import browser_nonce_cookie_name
@@ -395,6 +399,61 @@ def test_get_connect_route_is_removed(client) -> None:
     )
     # Middleware may 401 when gated; with gate off FastAPI returns 405.
     assert response.status_code in {404, 405}
+
+
+@respx.mock
+def test_concurrent_callbacks_same_state_only_one_completes(client, db_session) -> None:
+    """Two overlapping callbacks for one state must not 500 or double-apply."""
+    integration_id = _github_seed_id(client)
+    authorize_url = _start_connect(client, integration_id)
+    state = _state_from_authorize_url(authorize_url)
+    cookie = browser_nonce_cookie_name(state)
+    nonce = client.cookies.get(cookie)
+    assert nonce
+
+    respx.post(GITHUB_TOKEN_URL).mock(
+        side_effect=lambda *args, **kwargs: Response(
+            200, json={"access_token": "gho_race", "scope": "read:user"}
+        )
+    )
+    respx.get("https://api.github.com/user").mock(
+        side_effect=lambda *args, **kwargs: Response(
+            200,
+            json={
+                "id": 99,
+                "login": "race-user",
+                "avatar_url": None,
+                "html_url": None,
+                "public_repos": 1,
+            },
+        )
+    )
+
+    barrier = Barrier(2)
+    statuses: list[int] = []
+
+    def hit(code: str) -> None:
+        threaded = TestClient(app)
+        threaded.cookies.set(cookie, nonce, path="/api/oauth/github")
+        barrier.wait()
+        response = threaded.get(
+            "/api/oauth/github/callback",
+            params={"code": code, "state": state},
+            follow_redirects=False,
+        )
+        statuses.append(response.status_code)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(hit, "code-a"), pool.submit(hit, "code-b")]
+        for future in as_completed(futures):
+            future.result()
+
+    assert sorted(statuses) == [302, 400]
+    profile = client.get(f"/api/integrations/{integration_id}/github").json()
+    assert profile["login"] == "race-user"
+    sessions = list(db_session.scalars(select(OAuthSessionORM)).all())
+    used = [row for row in sessions if row.used_at is not None]
+    assert len(used) >= 1
 
 
 @respx.mock

@@ -162,12 +162,28 @@ class GitHubOAuthService:
 
         expected_hash = oauth_session.browser_nonce_hash
         provided = request.cookies.get(browser_nonce_cookie_name(state))
-        if not expected_hash or not provided or hash_oauth_state(provided) != expected_hash:
+        provided_hash = hash_oauth_state(provided) if provided else ""
+        if (
+            not expected_hash
+            or not provided
+            or len(provided_hash) != len(expected_hash)
+            or not secrets.compare_digest(provided_hash, expected_hash)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="OAuth browser binding missing or invalid",
             )
-        return oauth_session
+        # Consume state only after the browser nonce matches, so a missing
+        # cookie cannot burn a valid session. Commit before outbound GitHub
+        # calls so a concurrent callback cannot also claim the same state.
+        claimed = oauth_session_repository.claim_unused(session, oauth_session, now=now)
+        if claimed is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth state already used",
+            )
+        session.commit()
+        return claimed
 
     def handle_callback(
         self,
@@ -332,9 +348,6 @@ class GitHubOAuthService:
             )
 
         oauth_session = self._require_bound_oauth_session(session, state=state, request=request)
-
-        oauth_session_repository.mark_used(session, oauth_session)
-        session.commit()
         logger.info(
             "GitHub OAuth cancelled for integration %s (error=%s)",
             oauth_session.integration_id,
